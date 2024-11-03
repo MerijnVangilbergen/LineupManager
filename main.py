@@ -5,6 +5,21 @@ import time
 import logging
 
 
+# time_ref = 4*60
+time_ref = 10
+
+def health_to_colour(health:float, scale:str, low:str, high:str) -> str:
+    if scale == "g-r":
+        rgb = low + (high - low) * np.array([2*(1-health), 2*health, 0])
+    elif scale == "b-r":
+        rgb = low + (high - low) * np.array([2*(1-health), 0, 2*health])
+    else:
+        raise ValueError("Invalid scale. Should be 'g-r' or 'b-r'.")
+    rgb = np.clip(np.asarray(rgb, dtype=int), low, high)
+    hex = f'#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}'
+    return hex
+
+
 class Wedstrijd:
     def __init__(self, spelers):
         # Set up logging configuration
@@ -17,7 +32,7 @@ class Wedstrijd:
         # Create a DataFrame to keep track of the players
         self.spelers = pd.DataFrame(index=spelers)
         self.spelers["Actief"] = False
-        self.spelers['Spot'] = np.arange(len(spelers))
+        self.spelers["Spot"] = 0
         self.spelers["Gespeeld"] = 0.0
         self.spelers["Laatste wijziging"] = np.nan
 
@@ -61,6 +76,14 @@ class Wedstrijd:
 
         self.spelers.at[speler_in, 'Spot'], self.spelers.at[speler_uit, 'Spot'] = self.spelers.at[speler_uit, 'Spot'], self.spelers.at[speler_in, 'Spot']
 
+        # order de bankspelers
+        self.order_bench()
+
+    def order_bench(self):
+        # This function orders the bench players based on the time they have been active
+        bench = self.spelers.loc[~self.spelers["Actief"]]
+        argsort = bench['Gespeeld'].argsort()
+        self.spelers.loc[bench.index[argsort], "Spot"] = np.arange(len(bench))
 
 class Dashboard():
     def __init__(self):
@@ -75,9 +98,7 @@ class Dashboard():
         screen_height = self.root.winfo_screenheight()
         self.scale_factor = screen_height / 1080  # Reference height is 1080px, adjust for others
 
-        # Configuration: Define sizes and colors
-        self.ACTIVE_COLOR = "lightgreen"
-        self.BENCH_COLOR = "lightblue"
+        # Configuration: Define sizes
         self.ACTIVE_RECT_SIZE = (int(screen_width * .4), int(screen_height * .075))  # Active player rectangles
         self.BENCH_RECT_SIZE = (int(screen_width * .4), int(screen_height * .045))  # Bench player rectangles
         self.spacing = int(screen_height * .04)  # Spacing between rectangles
@@ -122,8 +143,9 @@ class Dashboard():
         pause_button = tk.Button(self.root, text="Pauze", command=self.pause, font=("Helvetica", int(12 * self.scale_factor)))
         pause_button.pack(side='right', pady=self.spacing)
 
-        # Exit full screen on "Esc" key
+        # Full screen toggle using esc and f keys
         self.root.bind("<Escape>", lambda event: self.root.attributes("-fullscreen", False))
+        self.root.bind("f", lambda event: self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen")))
 
         # Initial display update and run the main loop
         self.refresh_dashboard()
@@ -139,23 +161,32 @@ class Dashboard():
         # Remove all previous drawings
         self.canvas_active.delete("all")
         self.canvas_bench.delete("all")
-
+        
         # Draw the players
         for speler in wedstrijd.spelers.index:
             if wedstrijd.spelers.at[speler,"Actief"]:
+                time_on_field = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
+                health = 1 / (1 + (time_on_field/time_ref)**2)
+                colour = health_to_colour(health=health, scale="g-r", low=144, high=238)
+
                 width, height = self.ACTIVE_RECT_SIZE
                 y_pos = self.spacing + wedstrijd.spelers.at[speler,"Spot"] * (height + self.spacing)
-                self.canvas_active.create_rectangle(self.spacing, y_pos, self.spacing + width, y_pos + height, fill=self.ACTIVE_COLOR)
+                self.canvas_active.create_rectangle(self.spacing, y_pos, self.spacing + width, y_pos + height, fill=colour)
                 self.canvas_active.create_text(self.spacing + width // 2, y_pos + height // 2, text=speler, font=("Helvetica", int(12*self.scale_factor)))
                 tijd_op_het_veld = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
                 tijd_op_het_veld = time.strftime("%M:%S", time.gmtime(tijd_op_het_veld)) # format mm:ss
                 self.canvas_active.create_text(self.spacing + 50, y_pos + height // 2, text=tijd_op_het_veld, font=("Helvetica", int(12*self.scale_factor)))
             else:
+                tijd_op_de_bank = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
+                health = 1 - 1 / (1 + (tijd_op_de_bank/time_ref)**2)
+                colour = health_to_colour(health=health, scale="g-r", low=200, high=238)
+                # health_long_term = 1 / (1 + (wedstrijd.spelers.at[speler,"Gespeeld"]/(4*60))**2)
+
                 width, height = self.BENCH_RECT_SIZE
                 y_pos = self.spacing + wedstrijd.spelers.at[speler,"Spot"] * (height + self.spacing/2)
-                self.canvas_bench.create_rectangle(self.spacing, y_pos, self.spacing + width, y_pos + height, fill=self.BENCH_COLOR)
+                self.canvas_bench.create_rectangle(self.spacing, y_pos, self.spacing + width, y_pos + height, fill=colour)
                 self.canvas_bench.create_text(self.spacing + width // 2, y_pos + height // 2, text=speler, font=("Helvetica", int(12*self.scale_factor)))
-                tijd_op_de_bank = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
+                
                 if tijd_op_de_bank < np.inf:
                     tijd_op_de_bank = time.strftime("%M:%S", time.gmtime(tijd_op_de_bank)) # format mm:ss
                 gespeeld = time.strftime("%M:%S", time.gmtime(wedstrijd.spelers.loc[speler,'Gespeeld'])) # format mm:ss
