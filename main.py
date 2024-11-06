@@ -5,8 +5,18 @@ import time
 import logging
 
 
-# time_ref = 4*60
-time_ref = 10
+time_ref = 4*60
+
+
+def get_coords(canvas, rectangle, coords:str) -> tuple:
+    x0, y0, x1, y1 = canvas.coords(rectangle)
+    if coords == 'center':
+        return (int((x0 + x1) // 2), int((y0 + y1) // 2))
+    elif coords == 'w':
+        return (x0, int((y0 + y1) // 2))
+    else:
+        raise ValueError("Invalid coords.")
+
 
 def health_to_colour(health:float, scale:str, low:str, high:str) -> str:
     if scale == "g-r":
@@ -85,6 +95,43 @@ class Wedstrijd:
         argsort = bench['Gespeeld'].argsort()
         self.spelers.loc[bench.index[argsort], "Spot"] = np.arange(len(bench))
 
+
+class PlayerSelector:
+    def __init__(self, spelers:list):
+        # Create main window
+        self.root = tk.Tk()
+        self.root.attributes("-fullscreen", True)
+
+        # Full screen toggle using esc and f keys
+        self.root.bind("<Escape>", lambda event: self.root.attributes("-fullscreen", False))
+        self.root.bind("f", lambda event: self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen")))
+        
+        # Keep track of sizes and spacing
+        screen_size = np.asarray([self.root.winfo_screenwidth(), self.root.winfo_screenheight()], dtype=int)
+        ncols = 3
+        grid_size = np.asarray([ncols, np.ceil(len(spelers)/ncols)], dtype=int)
+        rect_size = np.asarray(.75 * screen_size / grid_size, dtype=int)
+        spacing = np.asarray((screen_size - grid_size * rect_size) / (grid_size + 1), dtype=int)
+        
+        scale_factor = screen_size[1] / 1080  # Reference height is 1080px, adjust for others
+        self.font = ("Helvetica", int(12*scale_factor))
+        for ss, speler in enumerate(spelers):
+            canvas = tk.Canvas(self.root)
+            canvas.grid(row=ss // 3, column=ss % 3, sticky="nsew", padx=0, pady=0)
+            rectangle = canvas.create_rectangle(*spacing, *(spacing + rect_size))
+            canvas.create_text( get_coords(canvas, rectangle, 'center'), 
+                                text=speler, 
+                                font=self.font)
+
+        # Make sure the columns and rows take up equal space
+        for i in range(grid_size[0]):
+            self.root.grid_columnconfigure(i, weight=1)
+        for i in range(grid_size[1]):
+            self.root.grid_rowconfigure(i, weight=1)
+
+        self.root.mainloop()
+
+
 class Dashboard():
     def __init__(self):
         self.paused = False
@@ -94,31 +141,32 @@ class Dashboard():
         # Create main window
         self.root = tk.Tk()
         self.root.attributes("-fullscreen", True)
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        self.scale_factor = screen_height / 1080  # Reference height is 1080px, adjust for others
+        screen_size = np.asarray([self.root.winfo_screenwidth(), self.root.winfo_screenheight()], dtype=int)
+        scale_factor = screen_size[1] / 1080  # Reference height is 1080px, adjust for others
+        self.font = ("Helvetica", int(12*scale_factor))
+
+        # Full screen toggle using esc and f keys
+        self.root.bind("<Escape>", lambda event: self.root.attributes("-fullscreen", False))
+        self.root.bind("f", lambda event: self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen")))
 
         # Configuration: Define sizes
-        self.ACTIVE_RECT_SIZE = (int(screen_width * .4), int(screen_height * .075))  # Active player rectangles
-        self.BENCH_RECT_SIZE = (int(screen_width * .4), int(screen_height * .045))  # Bench player rectangles
-        self.spacing = int(screen_height * .04)  # Spacing between rectangles
+        self.ACTIVE_RECT_SIZE = (int(screen_size[0] * .4), int(screen_size[1] * .075))  # Active player rectangles
+        self.BENCH_RECT_SIZE = (int(screen_size[0] * .4), int(screen_size[1] * .045))  # Bench player rectangles
+        self.spacing = int(screen_size[1] * .04)  # Spacing between rectangles
 
-        # Create a frame to organize the layout in full screen
+        # Create a frame to organize the layout
         self.main_frame = tk.Frame(self.root)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
         # Create subtitles for active players and bench players
-        active_label = tk.Label(self.main_frame, text="Het veld", font=("Helvetica", int(16 * self.scale_factor)))
-        bench_label = tk.Label(self.main_frame, text="De bank", font=("Helvetica", int(16 * self.scale_factor)))
-
-        # Create canvases for active and bench players inside the frame
-        self.canvas_active = tk.Canvas(self.main_frame, bg="white")
-        self.canvas_bench = tk.Canvas(self.main_frame, bg="white")
-        
-        # Organize the widgets using grid layout
+        active_label = tk.Label(self.main_frame, text="Het veld", font=self.font)
+        bench_label = tk.Label(self.main_frame, text="De bank", font=self.font)
         active_label.grid(row=0, column=0, padx=self.spacing, pady=self.spacing)
         bench_label.grid(row=0, column=1, padx=self.spacing, pady=self.spacing)
 
+        # Create canvases for active and bench players inside the frame
+        self.canvas_active = tk.Canvas(self.main_frame)
+        self.canvas_bench = tk.Canvas(self.main_frame)
         self.canvas_active.grid(row=1, column=0, sticky="nsew", padx=self.spacing, pady=self.spacing)
         self.canvas_bench.grid(row=1, column=1, sticky="nsew", padx=self.spacing, pady=self.spacing)
         
@@ -132,27 +180,23 @@ class Dashboard():
         self.main_frame.grid_rowconfigure(1, weight=1)
 
         # Button to swap players
-        swap_button = tk.Button(self.root, text="Wissel", command=self.wissel, font=("Helvetica", int(12 * self.scale_factor)))
+        swap_button = tk.Button(self.root, text="Wissel", command=self.wissel, font=self.font)
         swap_button.pack(pady=self.spacing)
 
         # Button to end the game
-        end_button = tk.Button(self.root, text="Einde", command=self.end, font=("Helvetica", int(12 * self.scale_factor)))
+        end_button = tk.Button(self.root, text="Einde", command=self.end, font=self.font)
         end_button.pack(side='right', pady=self.spacing)
 
         # Button to pause the game
-        pause_button = tk.Button(self.root, text="Pauze", command=self.pause, font=("Helvetica", int(12 * self.scale_factor)))
+        pause_button = tk.Button(self.root, text="Pauze", command=self.pause, font=self.font)
         pause_button.pack(side='right', pady=self.spacing)
-
-        # Full screen toggle using esc and f keys
-        self.root.bind("<Escape>", lambda event: self.root.attributes("-fullscreen", False))
-        self.root.bind("f", lambda event: self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen")))
 
         # Initial display update and run the main loop
         self.refresh_dashboard()
         self.root.mainloop()
 
     def refresh_dashboard(self):
-        """ Continuously refresh the dashboard every second """
+        ''' Continuously refresh the dashboard every second '''
         if not self.paused:
             self.create_display()  # Redraw the entire dashboard
         self.root.after(1000, self.refresh_dashboard)  # Schedule the next refresh after 1 second
@@ -161,6 +205,9 @@ class Dashboard():
         # Remove all previous drawings
         self.canvas_active.delete("all")
         self.canvas_bench.delete("all")
+
+        self.active_rectangles = [None] * wedstrijd.spelers["Actief"].sum()
+        self.bench_rectangles = [None] * (~wedstrijd.spelers["Actief"]).sum()
         
         # Draw the players
         for speler in wedstrijd.spelers.index:
@@ -169,30 +216,38 @@ class Dashboard():
                 health = 1 / (1 + (time_on_field/time_ref)**2)
                 colour = health_to_colour(health=health, scale="g-r", low=144, high=238)
 
-                width, height = self.ACTIVE_RECT_SIZE
-                y_pos = self.spacing + wedstrijd.spelers.at[speler,"Spot"] * (height + self.spacing)
-                self.canvas_active.create_rectangle(self.spacing, y_pos, self.spacing + width, y_pos + height, fill=colour)
-                self.canvas_active.create_text(self.spacing + width // 2, y_pos + height // 2, text=speler, font=("Helvetica", int(12*self.scale_factor)))
+                spot = wedstrijd.spelers.at[speler,"Spot"]
+                xy = np.asarray([self.spacing, self.spacing + spot * (self.ACTIVE_RECT_SIZE[1] + self.spacing)], dtype=int)
+                rectangle = self.canvas_active.create_rectangle(*xy, *(xy+self.ACTIVE_RECT_SIZE), fill=colour)
+                self.active_rectangles[spot] = rectangle
+                self.canvas_active.create_text( get_coords(self.canvas_active, rectangle, 'center'), 
+                                                text=speler, 
+                                                font=self.font)
                 tijd_op_het_veld = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
                 tijd_op_het_veld = time.strftime("%M:%S", time.gmtime(tijd_op_het_veld)) # format mm:ss
-                self.canvas_active.create_text(self.spacing + 50, y_pos + height // 2, text=tijd_op_het_veld, font=("Helvetica", int(12*self.scale_factor)))
+                self.canvas_active.create_text( get_coords(self.canvas_active, rectangle, 'w'), 
+                                                anchor='w', 
+                                                text=5*' ' + tijd_op_het_veld, 
+                                                font=self.font)
             else:
                 tijd_op_de_bank = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
                 health = 1 - 1 / (1 + (tijd_op_de_bank/time_ref)**2)
                 colour = health_to_colour(health=health, scale="g-r", low=200, high=238)
-                # health_long_term = 1 / (1 + (wedstrijd.spelers.at[speler,"Gespeeld"]/(4*60))**2)
 
-                width, height = self.BENCH_RECT_SIZE
-                y_pos = self.spacing + wedstrijd.spelers.at[speler,"Spot"] * (height + self.spacing/2)
-                self.canvas_bench.create_rectangle(self.spacing, y_pos, self.spacing + width, y_pos + height, fill=colour)
-                self.canvas_bench.create_text(self.spacing + width // 2, y_pos + height // 2, text=speler, font=("Helvetica", int(12*self.scale_factor)))
-                
+                spot = wedstrijd.spelers.at[speler,"Spot"]
+                xy = np.asarray([self.spacing, self.spacing + spot * (self.BENCH_RECT_SIZE[1] + self.spacing/2)], dtype=int)
+                rectangle = self.canvas_bench.create_rectangle(*xy, *(xy+self.BENCH_RECT_SIZE), fill=colour)
+                self.bench_rectangles[spot] = rectangle
+                self.canvas_bench.create_text(  get_coords(self.canvas_bench, rectangle, 'center'), 
+                                                text=speler, 
+                                                font=self.font)
                 if tijd_op_de_bank < np.inf:
                     tijd_op_de_bank = time.strftime("%M:%S", time.gmtime(tijd_op_de_bank)) # format mm:ss
                 gespeeld = time.strftime("%M:%S", time.gmtime(wedstrijd.spelers.loc[speler,'Gespeeld'])) # format mm:ss
-                self.canvas_bench.create_text(self.spacing + 20, y_pos + height // 2, 
-                                              text=f' Recuperatie: {tijd_op_de_bank} \n Gespeeld: {gespeeld}', 
-                                              font=("Helvetica", int(12*self.scale_factor)), anchor='w')
+                self.canvas_bench.create_text(  get_coords(self.canvas_bench, rectangle, 'w'), 
+                                                anchor='w',
+                                                text=f'  Recuperatie: {tijd_op_de_bank}\n  Gespeeld: {gespeeld}', 
+                                                font=self.font)
 
     # Function to handle player swapping logic
     def wissel(self):
@@ -223,9 +278,9 @@ class Dashboard():
 
     # Function to highlight selected player with the appropriate tag
     def highlight_selection(self, canvas, index, rect_size, tag, spacing):
-        width, height = rect_size
-        y_pos = self.spacing + index * (height + spacing)
-        canvas.create_rectangle(self.spacing, y_pos, self.spacing + width, y_pos + height, outline="red", width=2, tags=tag)
+        y_pos = self.spacing + index * (rect_size[1] + spacing)
+        xy = np.asarray([self.spacing, y_pos], dtype=int)
+        canvas.create_rectangle(*xy, *(xy+rect_size), outline="red", width=2, tags=tag)
 
     # Reset selections after swapping
     def reset_selections(self):
@@ -255,11 +310,11 @@ class Dashboard():
         # pop up window asking for confirmation
         popup = tk.Tk()
         popup.wm_title("Pauze")
-        label = tk.Label(popup, text="De wedstrijd is gepauzeerd.", font=("Helvetica", int(12 * self.scale_factor)))
+        label = tk.Label(popup, text="De wedstrijd is gepauzeerd.", font=self.font)
         label.pack(side="top", fill="x", pady=10)
-        resume_button = tk.Button(popup, text="Wedstrijd hervatten", command=unpause, font=("Helvetica", int(12 * self.scale_factor)))
+        resume_button = tk.Button(popup, text="Wedstrijd hervatten", command=unpause, font=self.font)
         resume_button.pack()
-        cancel_button = tk.Button(popup, text="Pauze ongedaan maken", command=cancel, font=("Helvetica", int(12 * self.scale_factor)))
+        cancel_button = tk.Button(popup, text="Pauze ongedaan maken", command=cancel, font=self.font)
         cancel_button.pack()
         
     def end(self):
@@ -274,18 +329,20 @@ class Dashboard():
         # pop up window asking for confirmation
         popup = tk.Tk()
         popup.wm_title("Einde wedstrijd")
-        label = tk.Label(popup, text="Wedstrijd beëindigen?", font=("Helvetica", int(12 * self.scale_factor)))
+        label = tk.Label(popup, text="Wedstrijd beëindigen?", font=self.font)
         label.pack(side="top", fill="x", pady=10)
-        yes_button = tk.Button(popup, text="Ja", command=end_game, font=("Helvetica", int(12 * self.scale_factor)))
+        yes_button = tk.Button(popup, text="Ja", command=end_game, font=self.font)
         yes_button.pack()
-        no_button = tk.Button(popup, text="Nee", command=popup.destroy, font=("Helvetica", int(12 * self.scale_factor)))
+        no_button = tk.Button(popup, text="Nee", command=popup.destroy, font=self.font)
         no_button.pack()
 
 
 # Example usage
-alle_spelers = ["Speler 1", "Speler 2", "Speler 3", "Speler 4", "Speler 5", "Speler 6", "Speler 7", "Speler 8", "Speler 9", "Speler 10"]
+alle_spelers = np.loadtxt('spelers.txt', dtype=str, delimiter=',')
+
+# player_selector = PlayerSelector(alle_spelers)
 wedstrijd = Wedstrijd(alle_spelers)
-wedstrijd.init_opstelling("Speler 1", "Speler 2", "Speler 3", "Speler 4", "Speler 5")
+wedstrijd.init_opstelling(*alle_spelers[:5])
 wedstrijd.start(tijdstip=time.time())
 
 dashboard = Dashboard()
