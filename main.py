@@ -137,6 +137,8 @@ class Dashboard():
         self.paused = False
         self.active_selection = None
         self.bench_selection = None
+        self.active_rectangles = [None] * wedstrijd.spelers["Actief"].sum()
+        self.bench_rectangles = [None] * (~wedstrijd.spelers["Actief"]).sum()
 
         # Create main window
         self.root = tk.Tk()
@@ -155,18 +157,18 @@ class Dashboard():
         self.spacing = int(screen_size[1] * .04)  # Spacing between rectangles
 
         # Create a frame to organize the layout
-        self.main_frame = tk.Frame(self.root)
-        self.main_frame.pack(fill=tk.BOTH, expand=True)
+        main_frame = tk.Frame(self.root)
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
         # Create subtitles for active players and bench players
-        active_label = tk.Label(self.main_frame, text="Het veld", font=self.font)
-        bench_label = tk.Label(self.main_frame, text="De bank", font=self.font)
+        active_label = tk.Label(main_frame, text="Het veld", font=self.font)
+        bench_label = tk.Label(main_frame, text="De bank", font=self.font)
         active_label.grid(row=0, column=0, padx=self.spacing, pady=self.spacing)
         bench_label.grid(row=0, column=1, padx=self.spacing, pady=self.spacing)
 
         # Create canvases for active and bench players inside the frame
-        self.canvas_active = tk.Canvas(self.main_frame)
-        self.canvas_bench = tk.Canvas(self.main_frame)
+        self.canvas_active = tk.Canvas(main_frame)
+        self.canvas_bench = tk.Canvas(main_frame)
         self.canvas_active.grid(row=1, column=0, sticky="nsew", padx=self.spacing, pady=self.spacing)
         self.canvas_bench.grid(row=1, column=1, sticky="nsew", padx=self.spacing, pady=self.spacing)
         
@@ -175,9 +177,9 @@ class Dashboard():
         self.canvas_bench.bind("<Button-1>", lambda event: self.select_player(event, "bench"))
 
         # Make sure the columns and rows take up equal space
-        self.main_frame.grid_columnconfigure(0, weight=1)
-        self.main_frame.grid_columnconfigure(1, weight=1)
-        self.main_frame.grid_rowconfigure(1, weight=1)
+        main_frame.grid_columnconfigure(0, weight=1)
+        main_frame.grid_columnconfigure(1, weight=1)
+        main_frame.grid_rowconfigure(1, weight=1)
 
         # Button to swap players
         swap_button = tk.Button(self.root, text="Wissel", command=self.wissel, font=self.font)
