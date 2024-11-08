@@ -346,12 +346,10 @@ class Dashboard():
         resume_button.pack()
         cancel_button = tk.Button(popup, text="Pauze ongedaan maken", command=cancel, font=self.font)
         cancel_button.pack()
-        cancel_button = tk.Button(popup, text="Wedstrijd beëindigen", command=self.end, font=self.font)
+        cancel_button = tk.Button(popup, text="Wedstrijd beëindigen", command=lambda: self.end(tijdstip), font=self.font)
         cancel_button.pack()
         
-    def end(self):
-        tijdstip = time.time()
-
+    def end(self, tijdstip):
         def end_game():
             wedstrijd.end(tijdstip)
             self.root.destroy()
