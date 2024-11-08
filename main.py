@@ -7,6 +7,17 @@ import logging
 
 time_ref = 4*60
 
+def configure_grid_uniformly(root):
+    # Make sure the columns and rows take up equal space
+    for i in range(root.grid_size()[0]):
+        root.grid_columnconfigure(i, weight=1)
+    for i in range(root.grid_size()[1]):
+        root.grid_rowconfigure(i, weight=1)
+
+def flip_colour(button):
+    current_color = button.cget("bg")  # Get current background color
+    new_color = "green" if current_color == "red" else "red"  # Toggle color
+    button.config(bg=new_color)
 
 def get_coords(canvas, rectangle, coords:str) -> tuple:
     x0, y0, x1, y1 = canvas.coords(rectangle)
@@ -16,7 +27,6 @@ def get_coords(canvas, rectangle, coords:str) -> tuple:
         return (x0, int((y0 + y1) // 2))
     else:
         raise ValueError("Invalid coords.")
-
 
 def health_to_colour(health:float, scale:str, low:str, high:str) -> str:
     if scale == "g-r":
@@ -77,12 +87,14 @@ class Wedstrijd:
 
         # naar de bank
         self.spelers.at[speler_uit, "Actief"] = False
-        self.spelers.at[speler_uit, "Gespeeld"] += tijdstip - self.spelers.at[speler_uit, "Laatste wijziging"]
-        self.spelers.at[speler_uit, "Laatste wijziging"] = tijdstip
+        if ~np.isnan(self.spelers.at[speler_uit, "Laatste wijziging"]):
+            self.spelers.at[speler_uit, "Gespeeld"] += tijdstip - self.spelers.at[speler_uit, "Laatste wijziging"]
+            self.spelers.at[speler_uit, "Laatste wijziging"] = tijdstip
 
         # van de bank
         self.spelers.at[speler_in, "Actief"] = True
-        self.spelers.at[speler_in, "Laatste wijziging"] = tijdstip
+        if ~np.isnan(self.spelers.at[speler_in, "Laatste wijziging"]):
+            self.spelers.at[speler_in, "Laatste wijziging"] = tijdstip
 
         self.spelers.at[speler_in, 'Spot'], self.spelers.at[speler_uit, 'Spot'] = self.spelers.at[speler_uit, 'Spot'], self.spelers.at[speler_in, 'Spot']
 
@@ -111,25 +123,35 @@ class PlayerSelector:
         ncols = 3
         grid_size = np.asarray([ncols, np.ceil(len(spelers)/ncols)], dtype=int)
         rect_size = np.asarray(.75 * screen_size / grid_size, dtype=int)
-        spacing = np.asarray((screen_size - grid_size * rect_size) / (grid_size + 1), dtype=int)
-        
+
         scale_factor = screen_size[1] / 1080  # Reference height is 1080px, adjust for others
         self.font = ("Helvetica", int(12*scale_factor))
-        for ss, speler in enumerate(spelers):
-            canvas = tk.Canvas(self.root)
-            canvas.grid(row=ss // 3, column=ss % 3, sticky="nsew", padx=0, pady=0)
-            rectangle = canvas.create_rectangle(*spacing, *(spacing + rect_size))
-            canvas.create_text( get_coords(canvas, rectangle, 'center'), 
-                                text=speler, 
-                                font=self.font)
 
-        # Make sure the columns and rows take up equal space
-        for i in range(grid_size[0]):
-            self.root.grid_columnconfigure(i, weight=1)
-        for i in range(grid_size[1]):
-            self.root.grid_rowconfigure(i, weight=1)
+        # Create a selection button for each player
+        def create_player_button(speler, ss):
+            button = tk.Button(self.root, 
+                               text=speler, 
+                               font=self.font, 
+                               width=rect_size[0], height=rect_size[1], 
+                               bg='green')
+            button.config(command=lambda button=button: flip_colour(button))
+            button.grid(row=ss // 3, column=ss % 3)
+            return button
 
+        self.player_buttons = [create_player_button(speler, ss) for ss, speler in enumerate(spelers)]
+
+        # add an extra row for the proceed button
+        proceed_button = tk.Button(self.root, text="Ga verder", font=self.font, width=rect_size[0], height=rect_size[1], command=self.ga_verder)
+        proceed_button.grid(row=grid_size[1], columnspan=grid_size[0])
+
+        configure_grid_uniformly(self.root)
         self.root.mainloop()
+
+    def ga_verder(self):
+        # Capture the player selection and close the window
+        self.selected_players = [button.cget("text") for button in self.player_buttons if button.cget("bg") == "green"]
+        self.root.destroy()
+        self.root.quit()
 
 
 class Dashboard():
@@ -137,8 +159,8 @@ class Dashboard():
         self.paused = False
         self.active_selection = None
         self.bench_selection = None
-        self.active_rectangles = [None] * wedstrijd.spelers["Actief"].sum()
-        self.bench_rectangles = [None] * (~wedstrijd.spelers["Actief"]).sum()
+        # self.active_rectangles = [None] * wedstrijd.spelers["Actief"].sum()
+        # self.bench_rectangles = [None] * (~wedstrijd.spelers["Actief"]).sum()
 
         # Create main window
         self.root = tk.Tk()
@@ -180,18 +202,14 @@ class Dashboard():
         main_frame.grid_columnconfigure(0, weight=1)
         main_frame.grid_columnconfigure(1, weight=1)
         main_frame.grid_rowconfigure(1, weight=1)
-
+        
         # Button to swap players
         swap_button = tk.Button(self.root, text="Wissel", command=self.wissel, font=self.font)
         swap_button.pack(pady=self.spacing)
 
-        # Button to end the game
-        end_button = tk.Button(self.root, text="Einde", command=self.end, font=self.font)
-        end_button.pack(side='right', pady=self.spacing)
-
-        # Button to pause the game
-        pause_button = tk.Button(self.root, text="Pauze", command=self.pause, font=self.font)
-        pause_button.pack(side='right', pady=self.spacing)
+        # Button to start the game
+        self.start_stop_button = tk.Button(self.root, text="Start wedstrijd", command=self.start, font=self.font)
+        self.start_stop_button.pack(side='right', pady=self.spacing)
 
         # Initial display update and run the main loop
         self.refresh_dashboard()
@@ -208,38 +226,42 @@ class Dashboard():
         self.canvas_active.delete("all")
         self.canvas_bench.delete("all")
 
-        self.active_rectangles = [None] * wedstrijd.spelers["Actief"].sum()
-        self.bench_rectangles = [None] * (~wedstrijd.spelers["Actief"]).sum()
+        # self.active_rectangles = [None] * wedstrijd.spelers["Actief"].sum()
+        # self.bench_rectangles = [None] * (~wedstrijd.spelers["Actief"]).sum()
         
         # Draw the players
         for speler in wedstrijd.spelers.index:
             if wedstrijd.spelers.at[speler,"Actief"]:
-                time_on_field = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
-                health = 1 / (1 + (time_on_field/time_ref)**2)
+                if np.isnan(wedstrijd.spelers.at[speler,"Laatste wijziging"]):
+                    tijd_op_het_veld = 0
+                else:
+                    tijd_op_het_veld = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
+                health = 1 / (1 + (tijd_op_het_veld/time_ref)**2)
                 colour = health_to_colour(health=health, scale="g-r", low=144, high=238)
 
                 spot = wedstrijd.spelers.at[speler,"Spot"]
                 xy = np.asarray([self.spacing, self.spacing + spot * (self.ACTIVE_RECT_SIZE[1] + self.spacing)], dtype=int)
                 rectangle = self.canvas_active.create_rectangle(*xy, *(xy+self.ACTIVE_RECT_SIZE), fill=colour)
-                self.active_rectangles[spot] = rectangle
+                # self.active_rectangles[spot] = rectangle
                 self.canvas_active.create_text( get_coords(self.canvas_active, rectangle, 'center'), 
                                                 text=speler, 
                                                 font=self.font)
-                tijd_op_het_veld = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
-                tijd_op_het_veld = time.strftime("%M:%S", time.gmtime(tijd_op_het_veld)) # format mm:ss
                 self.canvas_active.create_text( get_coords(self.canvas_active, rectangle, 'w'), 
                                                 anchor='w', 
-                                                text=5*' ' + tijd_op_het_veld, 
+                                                text=5*' ' + time.strftime("%M:%S", time.gmtime(tijd_op_het_veld)), # format mm:ss
                                                 font=self.font)
             else:
-                tijd_op_de_bank = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
+                if np.isnan(wedstrijd.spelers.at[speler,"Laatste wijziging"]):
+                    tijd_op_de_bank = np.inf
+                else:
+                    tijd_op_de_bank = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
                 health = 1 - 1 / (1 + (tijd_op_de_bank/time_ref)**2)
                 colour = health_to_colour(health=health, scale="g-r", low=200, high=238)
 
                 spot = wedstrijd.spelers.at[speler,"Spot"]
                 xy = np.asarray([self.spacing, self.spacing + spot * (self.BENCH_RECT_SIZE[1] + self.spacing/2)], dtype=int)
                 rectangle = self.canvas_bench.create_rectangle(*xy, *(xy+self.BENCH_RECT_SIZE), fill=colour)
-                self.bench_rectangles[spot] = rectangle
+                # self.bench_rectangles[spot] = rectangle
                 self.canvas_bench.create_text(  get_coords(self.canvas_bench, rectangle, 'center'), 
                                                 text=speler, 
                                                 font=self.font)
@@ -295,6 +317,12 @@ class Dashboard():
         self.canvas_active.delete("active_selected")
         self.canvas_bench.delete("bench_selected")
     
+    def start(self):
+        wedstrijd.start(time.time())
+
+        # make the start button a pause button
+        self.start_stop_button.config(text="Pauzeer / Beëindig wedstrijd", command=self.pause)
+
     def pause(self):
         tijdstip = time.time()
         self.paused = True
@@ -318,13 +346,14 @@ class Dashboard():
         resume_button.pack()
         cancel_button = tk.Button(popup, text="Pauze ongedaan maken", command=cancel, font=self.font)
         cancel_button.pack()
+        cancel_button = tk.Button(popup, text="Wedstrijd beëindigen", command=self.end, font=self.font)
+        cancel_button.pack()
         
     def end(self):
         tijdstip = time.time()
 
         def end_game():
             wedstrijd.end(tijdstip)
-            # Close the dashboard
             self.root.destroy()
             self.root.quit()
         
@@ -341,10 +370,10 @@ class Dashboard():
 
 # Example usage
 alle_spelers = np.loadtxt('spelers.txt', dtype=str, delimiter=',')
+player_selector = PlayerSelector(alle_spelers)
+spelers = player_selector.selected_players
 
-# player_selector = PlayerSelector(alle_spelers)
-wedstrijd = Wedstrijd(alle_spelers)
-wedstrijd.init_opstelling(*alle_spelers[:5])
-wedstrijd.start(tijdstip=time.time())
+wedstrijd = Wedstrijd(spelers)
+wedstrijd.init_opstelling(*spelers[:5])
 
 dashboard = Dashboard()

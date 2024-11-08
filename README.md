@@ -7,10 +7,9 @@ The language used in this program is a mixture of English and Dutch.
 - After the game, a player proposed to always have one player ready for substitution for each position on the field. This raises the idea to make the dashboard visualize the 5 positions on the field and make a reservation slot for each. I think it would be nice if we could drag players from the bench to the reservation spot.
 - The program creates a log file and a summary csv file. If the program is run twice on the same day, it puts both logs in the same file and the second csv overwrites the first csv. To be solved.
 - Undo button to be added.
+- I don't seem to understand how to apply height and width to a button.
 
 cleaning tkinter code:
-- The highlight of a rectangular box should be done by setting outline. 
-    See https://anzeljg.github.io/rin2/book2/2405/docs/tkinter/create_rectangle.html
-    For this, store all rectangles as attributes to the dashboard object.
+- Replace all rectangles by buttons (highlight buttons by changing the contour)
 - Use grid to structure the dashboard:
     See https://tkdocs.com/tutorial/grid.html
