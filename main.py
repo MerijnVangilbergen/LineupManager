@@ -104,22 +104,22 @@ class PlayerSelector:
         
         # Keep track of sizes and spacing
         screen_size = np.asarray([self.root.winfo_screenwidth(), self.root.winfo_screenheight()], dtype=int)
-        ncols = 3
+        ncols = 4
 
         scale_factor = screen_size[1] / 1080  # Reference height is 1080px, adjust for others
         font = ("Helvetica", int(18*scale_factor))
 
         # Create a selection button for each player
-        self.init_players(ncols=ncols, button_size=(40,4), font=font, selectie=selectie)
+        self.init_players(ncols=ncols, button_size=(30,4), font=font, selectie=selectie)
 
         # add the proceed button in a new row
         proceed_button = tk.Button(self.root, 
                                    text="Ga verder", 
                                    font=font, 
-                                   width=80, 
+                                   width=60, 
                                    height=4, 
                                    command=self.ga_verder)
-        proceed_button.grid(row=len(self.player_buttons) // ncols, columnspan=ncols)
+        proceed_button.grid(row=np.ceil(len(self.player_buttons) / ncols).astype(int), columnspan=ncols)
 
         configure_grid_uniformly(self.root)
         self.root.mainloop()
