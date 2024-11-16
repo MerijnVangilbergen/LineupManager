@@ -19,15 +19,6 @@ def flip_colour(button):
     new_color = "green" if current_color == "red" else "red"  # Toggle color
     button.config(bg=new_color)
 
-def get_coords(canvas, rectangle, coords:str) -> tuple:
-    x0, y0, x1, y1 = canvas.coords(rectangle)
-    if coords == 'center':
-        return (int((x0 + x1) // 2), int((y0 + y1) // 2))
-    elif coords == 'w':
-        return (x0, int((y0 + y1) // 2))
-    else:
-        raise ValueError("Invalid coords.")
-
 def health_to_colour(health:float, scale:str, low:str, high:str) -> str:
     if scale == "g-r":
         rgb = low + (high - low) * np.array([2*(1-health), 2*health, 0])
@@ -51,21 +42,14 @@ class Wedstrijd:
     
         # Create a DataFrame to keep track of the players
         self.spelers = pd.DataFrame(index=spelers)
-        self.spelers["Actief"] = False
-        self.spelers["Spot"] = 0
+        self.spelers["Actief"] = np.append(np.ones(5, dtype=bool), np.zeros(len(spelers) - 5, dtype=bool))
+        self.spelers["Spot"] = np.append(np.arange(5), np.arange(len(spelers) - 5))
         self.spelers["Gespeeld"] = 0.0
         self.spelers["Laatste wijziging"] = np.nan
-
+    
     def log_function_call(self, function_name, *args):
         """Logs the function calls with their arguments."""
         logging.info(f'{function_name}({args})')
-
-    def init_opstelling(self, *spelers):
-        self.log_function_call("init_opstelling", *spelers)
-        self.spelers.loc[spelers, "Actief"] = True
-        self.spelers.loc[spelers, 'Spot'] = np.arange(len(spelers))
-        andere_spelers = self.spelers.index.difference(spelers)
-        self.spelers.loc[andere_spelers, "Spot"] = np.arange(len(andere_spelers))
 
     def start(self, tijdstip):
         self.log_function_call("start")
@@ -109,7 +93,7 @@ class Wedstrijd:
 
 
 class PlayerSelector:
-    def __init__(self, spelers:list):
+    def __init__(self, selectie=None):
         # Create main window
         self.root = tk.Tk()
         self.root.attributes("-fullscreen", True)
@@ -121,31 +105,46 @@ class PlayerSelector:
         # Keep track of sizes and spacing
         screen_size = np.asarray([self.root.winfo_screenwidth(), self.root.winfo_screenheight()], dtype=int)
         ncols = 3
-        grid_size = np.asarray([ncols, np.ceil(len(spelers)/ncols)], dtype=int)
-        rect_size = np.asarray(.75 * screen_size / grid_size, dtype=int)
 
         scale_factor = screen_size[1] / 1080  # Reference height is 1080px, adjust for others
-        self.font = ("Helvetica", int(12*scale_factor))
+        font = ("Helvetica", int(18*scale_factor))
 
         # Create a selection button for each player
-        def create_player_button(speler, ss):
-            button = tk.Button(self.root, 
-                               text=speler, 
-                               font=self.font, 
-                               width=rect_size[0], height=rect_size[1], 
-                               bg='green')
-            button.config(command=lambda button=button: flip_colour(button))
-            button.grid(row=ss // 3, column=ss % 3)
-            return button
+        self.init_players(ncols=ncols, button_size=(40,4), font=font, selectie=selectie)
 
-        self.player_buttons = [create_player_button(speler, ss) for ss, speler in enumerate(spelers)]
-
-        # add an extra row for the proceed button
-        proceed_button = tk.Button(self.root, text="Ga verder", font=self.font, width=rect_size[0], height=rect_size[1], command=self.ga_verder)
-        proceed_button.grid(row=grid_size[1], columnspan=grid_size[0])
+        # add the proceed button in a new row
+        proceed_button = tk.Button(self.root, 
+                                   text="Ga verder", 
+                                   font=font, 
+                                   width=80, 
+                                   height=4, 
+                                   command=self.ga_verder)
+        proceed_button.grid(row=len(self.player_buttons) // ncols, columnspan=ncols)
 
         configure_grid_uniformly(self.root)
         self.root.mainloop()
+
+    def init_players(self, ncols:int, button_size:tuple|list|np.ndarray, font, selectie:list=None):
+        spelers = np.loadtxt('spelers.txt', dtype=str, delimiter=',')
+        if selectie is None:
+            selected = np.ones(len(spelers), dtype=bool)
+        else:
+            selected = np.isin(spelers, selectie)
+
+        self.player_buttons = []
+        for ss, speler in enumerate(spelers):
+            button = tk.Button( self.root, 
+                                text=speler, 
+                                font=font, 
+                                width=button_size[0], 
+                                height=button_size[1], 
+                                relief=tk.FLAT, 
+                                bg='green' if selected[ss] else 'red')
+            button.config(command=lambda button=button: flip_colour(button))
+            button.grid(row=ss // ncols, column=ss % ncols)
+            self.player_buttons.append(button)
+
+        configure_grid_uniformly(self.root)
 
     def ga_verder(self):
         # Capture the player selection and close the window
@@ -159,163 +158,192 @@ class Dashboard():
         self.paused = False
         self.active_selection = None
         self.bench_selection = None
-        # self.active_rectangles = [None] * wedstrijd.spelers["Actief"].sum()
-        # self.bench_rectangles = [None] * (~wedstrijd.spelers["Actief"]).sum()
 
         # Create main window
         self.root = tk.Tk()
         self.root.attributes("-fullscreen", True)
         screen_size = np.asarray([self.root.winfo_screenwidth(), self.root.winfo_screenheight()], dtype=int)
         scale_factor = screen_size[1] / 1080  # Reference height is 1080px, adjust for others
-        self.font = ("Helvetica", int(12*scale_factor))
+        self.font = ("Helvetica", int(14*scale_factor))
 
         # Full screen toggle using esc and f keys
         self.root.bind("<Escape>", lambda event: self.root.attributes("-fullscreen", False))
         self.root.bind("f", lambda event: self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen")))
 
+        # Top ribbon
+        # selection_button = tk.Button(self.root, text="Update selection", command=self.update_selection, font=self.font)
+        # selection_button.pack(side='top', anchor='nw')
+
         # Configuration: Define sizes
-        self.ACTIVE_RECT_SIZE = (int(screen_size[0] * .4), int(screen_size[1] * .075))  # Active player rectangles
-        self.BENCH_RECT_SIZE = (int(screen_size[0] * .4), int(screen_size[1] * .045))  # Bench player rectangles
         self.spacing = int(screen_size[1] * .04)  # Spacing between rectangles
 
         # Create a frame to organize the layout
         main_frame = tk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True)
-
-        # Create subtitles for active players and bench players
-        active_label = tk.Label(main_frame, text="Het veld", font=self.font)
-        bench_label = tk.Label(main_frame, text="De bank", font=self.font)
-        active_label.grid(row=0, column=0, padx=self.spacing, pady=self.spacing)
-        bench_label.grid(row=0, column=1, padx=self.spacing, pady=self.spacing)
-
-        # Create canvases for active and bench players inside the frame
-        self.canvas_active = tk.Canvas(main_frame)
-        self.canvas_bench = tk.Canvas(main_frame)
-        self.canvas_active.grid(row=1, column=0, sticky="nsew", padx=self.spacing, pady=self.spacing)
-        self.canvas_bench.grid(row=1, column=1, sticky="nsew", padx=self.spacing, pady=self.spacing)
-        
-        # Bind mouse clicks to selection function
-        self.canvas_active.bind("<Button-1>", lambda event: self.select_player(event, "active"))
-        self.canvas_bench.bind("<Button-1>", lambda event: self.select_player(event, "bench"))
-
-        # Make sure the columns and rows take up equal space
         main_frame.grid_columnconfigure(0, weight=1)
         main_frame.grid_columnconfigure(1, weight=1)
-        main_frame.grid_rowconfigure(1, weight=1)
-        
+        main_frame.grid_rowconfigure(0, weight=1)
+        main_frame.grid_rowconfigure(1, weight=5)
+        main_frame.grid_rowconfigure(2, weight=1)
+
+        # Create subtitles for active players and bench players
+        field_label = tk.Label(main_frame, text="Het veld", font=self.font)
+        bench_label = tk.Label(main_frame, text="De bank", font=self.font)
+        field_label.grid(row=0, column=0)
+        bench_label.grid(row=0, column=1)
+
+        # The active players
+        self.frame_active = tk.Frame(main_frame)
+        self.frame_active.grid(row=1, column=0, sticky="nsew")
+        self.field_buttons, self.field_labels = self.init_players(actief=True, frame=self.frame_active, size = (80,4))
+
+        # The bench players
+        self.frame_bench = tk.Frame(main_frame)
+        self.frame_bench.grid(row=1, column=1, sticky="nsew")
+        self.bench_buttons, self.bench_labels = self.init_players(actief=False, frame=self.frame_bench, size = (80,2))
+
+        # Bottom frame
+        bottom_frame = tk.Frame(main_frame)
+        bottom_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
+
         # Button to swap players
-        swap_button = tk.Button(self.root, text="Wissel", command=self.wissel, font=self.font)
-        swap_button.pack(pady=self.spacing)
+        swap_button = tk.Button(bottom_frame, text="Wissel", command=self.wissel, font=self.font, width=30, height=2)
+        swap_button.grid(row=0, column=1)
 
         # Button to start the game
-        self.start_stop_button = tk.Button(self.root, text="Start wedstrijd", command=self.start, font=self.font)
-        self.start_stop_button.pack(side='right', pady=self.spacing)
+        self.start_stop_button = tk.Button(bottom_frame, text="Start wedstrijd", command=self.start, font=self.font, width=30, height=2)
+        self.start_stop_button.grid(row=0, column=2)
+        configure_grid_uniformly(bottom_frame)
 
         # Initial display update and run the main loop
         self.refresh_dashboard()
         self.root.mainloop()
 
+    def init_players(self, actief:bool, frame:tk.Frame, size:tuple|list|np.ndarray):
+        buttons = []
+        labels = []
+        spelers = wedstrijd.spelers.loc[wedstrijd.spelers["Actief"] == actief]
+        for spot, name in zip(spelers["Spot"], spelers.index):
+            player_frame = tk.Frame(frame)
+            player_frame.grid(row=spot, column=0)
+            button = tk.Button( player_frame, 
+                                text=name, 
+                                font=self.font, 
+                                width=size[0], 
+                                height=size[1], 
+                                relief=tk.FLAT, 
+                                command=lambda active=actief, spot=spot: self.select(active, spot))
+            button.pack()
+            buttons.append(button)
+
+            label = tk.Label(player_frame, font=self.font, anchor='w')
+            label.place(relx=.02, rely=.5, anchor='w')
+            labels.append(label)
+        configure_grid_uniformly(frame)
+        return buttons, labels
+
     def refresh_dashboard(self):
         ''' Continuously refresh the dashboard every second '''
         if not self.paused:
-            self.create_display()  # Redraw the entire dashboard
+            self.update_time_features()  # Redraw the entire dashboard
         self.root.after(1000, self.refresh_dashboard)  # Schedule the next refresh after 1 second
 
-    def create_display(self):
-        # Remove all previous drawings
-        self.canvas_active.delete("all")
-        self.canvas_bench.delete("all")
-
-        # self.active_rectangles = [None] * wedstrijd.spelers["Actief"].sum()
-        # self.bench_rectangles = [None] * (~wedstrijd.spelers["Actief"]).sum()
-        
-        # Draw the players
-        for speler in wedstrijd.spelers.index:
+    def update_time_features(self):
+        ''' Update all time dependent features: time labels and colours '''
+        for speler, spot in zip(wedstrijd.spelers.index, wedstrijd.spelers['Spot']):
             if wedstrijd.spelers.at[speler,"Actief"]:
-                if np.isnan(wedstrijd.spelers.at[speler,"Laatste wijziging"]):
-                    tijd_op_het_veld = 0
-                else:
-                    tijd_op_het_veld = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
+                tijd_op_het_veld = 0 if np.isnan(wedstrijd.spelers.at[speler,"Laatste wijziging"]) else time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
                 health = 1 / (1 + (tijd_op_het_veld/time_ref)**2)
                 colour = health_to_colour(health=health, scale="g-r", low=144, high=238)
 
-                spot = wedstrijd.spelers.at[speler,"Spot"]
-                xy = np.asarray([self.spacing, self.spacing + spot * (self.ACTIVE_RECT_SIZE[1] + self.spacing)], dtype=int)
-                rectangle = self.canvas_active.create_rectangle(*xy, *(xy+self.ACTIVE_RECT_SIZE), fill=colour)
-                # self.active_rectangles[spot] = rectangle
-                self.canvas_active.create_text( get_coords(self.canvas_active, rectangle, 'center'), 
-                                                text=speler, 
-                                                font=self.font)
-                self.canvas_active.create_text( get_coords(self.canvas_active, rectangle, 'w'), 
-                                                anchor='w', 
-                                                text=5*' ' + time.strftime("%M:%S", time.gmtime(tijd_op_het_veld)), # format mm:ss
-                                                font=self.font)
+                self.field_buttons[spot].config(bg=colour)
+                self.field_labels[spot].config(bg=colour, text=time.strftime("%M:%S", time.gmtime(tijd_op_het_veld))) # format mm:ss
             else:
-                if np.isnan(wedstrijd.spelers.at[speler,"Laatste wijziging"]):
-                    tijd_op_de_bank = np.inf
-                else:
-                    tijd_op_de_bank = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
+                tijd_op_de_bank = np.inf if np.isnan(wedstrijd.spelers.at[speler,"Laatste wijziging"]) else time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
                 health = 1 - 1 / (1 + (tijd_op_de_bank/time_ref)**2)
                 colour = health_to_colour(health=health, scale="g-r", low=200, high=238)
 
-                spot = wedstrijd.spelers.at[speler,"Spot"]
-                xy = np.asarray([self.spacing, self.spacing + spot * (self.BENCH_RECT_SIZE[1] + self.spacing/2)], dtype=int)
-                rectangle = self.canvas_bench.create_rectangle(*xy, *(xy+self.BENCH_RECT_SIZE), fill=colour)
-                # self.bench_rectangles[spot] = rectangle
-                self.canvas_bench.create_text(  get_coords(self.canvas_bench, rectangle, 'center'), 
-                                                text=speler, 
-                                                font=self.font)
                 if tijd_op_de_bank < np.inf:
                     tijd_op_de_bank = time.strftime("%M:%S", time.gmtime(tijd_op_de_bank)) # format mm:ss
                 gespeeld = time.strftime("%M:%S", time.gmtime(wedstrijd.spelers.loc[speler,'Gespeeld'])) # format mm:ss
-                self.canvas_bench.create_text(  get_coords(self.canvas_bench, rectangle, 'w'), 
-                                                anchor='w',
-                                                text=f'  Recuperatie: {tijd_op_de_bank}\n  Gespeeld: {gespeeld}', 
-                                                font=self.font)
+
+                self.bench_buttons[spot].config(bg=colour)
+                self.bench_labels[spot].config(bg=colour, text=f'Recuperatie: {tijd_op_de_bank}\nGespeeld: {gespeeld}')
+    
+    def update_bench_names(self):
+        inactief = wedstrijd.spelers.loc[~wedstrijd.spelers["Actief"]]
+        for spot, name in zip(inactief["Spot"], inactief.index):
+            self.bench_buttons[spot].config(text=name)
+
+    # def update_selection(self):
+    #     player_selector = PlayerSelector(wedstrijd.spelers.index)
+    #     spelers = player_selector.selected_players
+    #     pass
 
     # Function to handle player swapping logic
     def wissel(self):
         if self.active_selection is not None and self.bench_selection is not None:
-            wedstrijd.wissel(speler_uit = wedstrijd.spelers.loc[(wedstrijd.spelers['Actief']) & (wedstrijd.spelers['Spot'] == self.active_selection)].index[0], 
-                             speler_in = wedstrijd.spelers.loc[~(wedstrijd.spelers['Actief']) & (wedstrijd.spelers['Spot'] == self.bench_selection)].index[0], 
+            peler_uit = wedstrijd.spelers.loc[(wedstrijd.spelers['Actief']) & (wedstrijd.spelers['Spot'] == self.active_selection)].index[0]
+            speler_in = wedstrijd.spelers.loc[~(wedstrijd.spelers['Actief']) & (wedstrijd.spelers['Spot'] == self.bench_selection)].index[0]
+            wedstrijd.wissel(speler_uit = peler_uit, 
+                             speler_in = speler_in, 
                              tijdstip = time.time())
-            # Swap between active and bench
-            self.create_display()
-            self.reset_selections()
+
+            # interchange names
+            self.field_buttons[self.active_selection].config(text=speler_in)
+            self.update_bench_names() # all need to be updated as the bench was reordered
+            self.update_time_features()
+
+            # unselect both
+            self.set_highlight(button=self.field_buttons[self.active_selection], highlight=False)
+            self.set_highlight(button=self.bench_buttons[self.bench_selection], highlight=False)
+            self.active_selection = None
+            self.bench_selection = None
 
     # Function to select a player when clicked
-    def select_player(self, event, source):
-        if source == "active":
-            # Calculate index based on y-position clicked
-            index = (event.y - self.spacing//2) // (self.ACTIVE_RECT_SIZE[1] + self.spacing)
-            if 0 <= index <= wedstrijd.spelers.loc[wedstrijd.spelers["Actief"], 'Spot'].max():
-                self.active_selection = index
-                self.canvas_active.delete("active_selected")  # Remove previous highlight
-                self.highlight_selection(self.canvas_active, self.active_selection, self.ACTIVE_RECT_SIZE, "active_selected", self.spacing)
-        elif source == "bench":
-            # Calculate index based on y-position clicked
-            index = (event.y - self.spacing//2) // (self.BENCH_RECT_SIZE[1] + self.spacing/2)
-            if 0 <= index <= wedstrijd.spelers.loc[~wedstrijd.spelers["Actief"], 'Spot'].max():
-                self.bench_selection = index
-                self.canvas_bench.delete("bench_selected")  # Remove previous highlight
-                self.highlight_selection(self.canvas_bench, self.bench_selection, self.BENCH_RECT_SIZE, "bench_selected", self.spacing/2)
+    def select(self, active:bool, spot:int):
+        if active:
+            # Unhighlight the previous selection
+            if self.active_selection is not None:
+                self.set_highlight(button=self.field_buttons[self.active_selection], highlight=False)
+            # Store the new selection
+            if spot == self.active_selection:
+                self.active_selection = None
+            else:
+                self.active_selection = spot
+            # Highlight the new selection
+            if self.active_selection is not None:
+                self.set_highlight(button=self.field_buttons[spot], highlight=True)
+        else:
+            # Unhighlight the previous selection
+            if self.bench_selection is not None:
+                self.set_highlight(button=self.bench_buttons[self.bench_selection], highlight=False)
+            # Store the new selection
+            if spot == self.bench_selection:
+                self.bench_selection = None
+            else:
+                self.bench_selection = spot
+            # Highlight the new selection
+            if self.bench_selection is not None:
+                self.set_highlight(button=self.bench_buttons[spot], highlight=True)
 
     # Function to highlight selected player with the appropriate tag
-    def highlight_selection(self, canvas, index, rect_size, tag, spacing):
-        y_pos = self.spacing + index * (rect_size[1] + spacing)
-        xy = np.asarray([self.spacing, y_pos], dtype=int)
-        canvas.create_rectangle(*xy, *(xy+rect_size), outline="red", width=2, tags=tag)
+    def set_highlight(self, button, highlight:bool):
+        if highlight:
+            button.config(relief=tk.SOLID)
+        else:
+            button.config(relief=tk.FLAT)
 
     # Reset selections after swapping
     def reset_selections(self):
         self.active_selection = None
         self.bench_selection = None
-        self.canvas_active.delete("active_selected")
-        self.canvas_bench.delete("bench_selected")
+        # self.canvas_active.delete("active_selected")
+        # self.canvas_bench.delete("bench_selected")
 
         # delete selection highlight
-        self.canvas_active.delete("active_selected")
-        self.canvas_bench.delete("bench_selected")
+        # self.canvas_active.delete("active_selected")
+        # self.canvas_bench.delete("bench_selected")
     
     def start(self):
         wedstrijd.start(time.time())
@@ -331,7 +359,7 @@ class Dashboard():
             wedstrijd.add_pause(begin=tijdstip, einde=time.time())
             popup.destroy()
             self.paused = False
-            self.create_display()
+            self.update_time_features()
         
         def cancel():
             popup.destroy()
@@ -367,11 +395,8 @@ class Dashboard():
 
 
 # Example usage
-alle_spelers = np.loadtxt('spelers.txt', dtype=str, delimiter=',')
-player_selector = PlayerSelector(alle_spelers)
+player_selector = PlayerSelector()
 spelers = player_selector.selected_players
 
 wedstrijd = Wedstrijd(spelers)
-wedstrijd.init_opstelling(*spelers[:5])
-
 dashboard = Dashboard()
