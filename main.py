@@ -5,7 +5,7 @@ import time
 import logging
 
 
-time_ref = 4*60
+time_ref = 10
 
 def configure_grid_uniformly(root):
     # Make sure the columns and rows take up equal space
@@ -45,39 +45,44 @@ class Wedstrijd:
         self.spelers["Actief"] = np.append(np.ones(5, dtype=bool), np.zeros(len(spelers) - 5, dtype=bool))
         self.spelers["Spot"] = np.append(np.arange(5), np.arange(len(spelers) - 5))
         self.spelers["Gespeeld"] = 0.0
-        self.spelers["Laatste wijziging"] = np.nan
+        self.spelers["Laatste wijziging"] = -np.inf
+        
+        self.paused = True
     
     def log_function_call(self, function_name, *args):
         """Logs the function calls with their arguments."""
         logging.info(f'{function_name}({args})')
+    
+    def unpause(self, tijdstip):
+        self.log_function_call("unpause")
+        self.paused = False
+        self.spelers.loc[self.spelers["Actief"], "Laatste wijziging"] = tijdstip
 
-    def start(self, tijdstip):
-        self.log_function_call("start")
-        self.spelers["Laatste wijziging"] = np.where(self.spelers["Actief"], tijdstip, -np.inf)
-
+    def pause(self, tijdstip):
+        self.log_function_call("pause")
+        self.paused = True
+        self.spelers.loc[self.spelers["Actief"], "Gespeeld"] += tijdstip - self.spelers.loc[self.spelers["Actief"], "Laatste wijziging"]
+        self.spelers.loc[self.spelers["Actief"], "Laatste wijziging"] = tijdstip
+    
     def end(self, tijdstip):
         self.log_function_call("end")
         self.spelers.loc[self.spelers["Actief"], "Gespeeld"] += tijdstip - self.spelers.loc[self.spelers["Actief"], "Laatste wijziging"]
         self.spelers["Laatste wijziging"] = tijdstip
-        self.spelers['Gespeeld'] = [time.strftime("%M:%S", time.gmtime(tijd)) for tijd in self.spelers['Gespeeld']] # format mm:ss
-        self.spelers['Gespeeld'].to_csv('wedstrijdoverzicht.csv')
-
-    def add_pause(self, begin, einde):
-        self.log_function_call("pause")
-        self.spelers.loc[self.spelers["Actief"], "Laatste wijziging"] += einde - begin
+        self.spelers["Gespeeld"] = [time.strftime("%M:%S", time.gmtime(tijd)) for tijd in self.spelers["Gespeeld"]] # format mm:ss
+        self.spelers["Gespeeld"].to_csv('wedstrijdoverzicht.csv')
 
     def wissel(self, speler_uit, speler_in, tijdstip):
         self.log_function_call("wissel", speler_uit, speler_in)
 
         # naar de bank
         self.spelers.at[speler_uit, "Actief"] = False
-        if ~np.isnan(self.spelers.at[speler_uit, "Laatste wijziging"]):
+        if not self.paused:
             self.spelers.at[speler_uit, "Gespeeld"] += tijdstip - self.spelers.at[speler_uit, "Laatste wijziging"]
             self.spelers.at[speler_uit, "Laatste wijziging"] = tijdstip
 
         # van de bank
         self.spelers.at[speler_in, "Actief"] = True
-        if ~np.isnan(self.spelers.at[speler_in, "Laatste wijziging"]):
+        if not self.paused:
             self.spelers.at[speler_in, "Laatste wijziging"] = tijdstip
 
         self.spelers.at[speler_in, 'Spot'], self.spelers.at[speler_uit, 'Spot'] = self.spelers.at[speler_uit, 'Spot'], self.spelers.at[speler_in, 'Spot']
@@ -88,7 +93,7 @@ class Wedstrijd:
     def order_bench(self):
         # This function orders the bench players based on the time they have been active
         bench = self.spelers.loc[~self.spelers["Actief"]]
-        argsort = bench['Gespeeld'].argsort()
+        argsort = bench["Gespeeld"].argsort()
         self.spelers.loc[bench.index[argsort], "Spot"] = np.arange(len(bench))
 
 
@@ -155,7 +160,6 @@ class PlayerSelector:
 
 class Dashboard():
     def __init__(self):
-        self.paused = False
         self.active_selection = None
         self.bench_selection = None
 
@@ -211,11 +215,12 @@ class Dashboard():
         swap_button.grid(row=0, column=1)
 
         # Button to start the game
-        self.start_stop_button = tk.Button(bottom_frame, text="Start wedstrijd", command=self.start, font=self.font, width=30, height=2)
+        self.start_stop_button = tk.Button(bottom_frame, text="Start wedstrijd", command=self.unpause, font=self.font, width=30, height=2)
         self.start_stop_button.grid(row=0, column=2)
         configure_grid_uniformly(bottom_frame)
 
         # Initial display update and run the main loop
+        self.update_time_features(initial=True)
         self.refresh_dashboard()
         self.root.mainloop()
 
@@ -244,28 +249,32 @@ class Dashboard():
 
     def refresh_dashboard(self):
         ''' Continuously refresh the dashboard every second '''
-        if not self.paused:
-            self.update_time_features()  # Redraw the entire dashboard
+        self.update_time_features()
         self.root.after(1000, self.refresh_dashboard)  # Schedule the next refresh after 1 second
 
-    def update_time_features(self):
+    def update_time_features(self, initial=False):
         ''' Update all time dependent features: time labels and colours '''
         for speler, spot in zip(wedstrijd.spelers.index, wedstrijd.spelers['Spot']):
             if wedstrijd.spelers.at[speler,"Actief"]:
-                tijd_op_het_veld = 0 if np.isnan(wedstrijd.spelers.at[speler,"Laatste wijziging"]) else time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
+                if wedstrijd.paused and not initial:
+                    continue
+                tijd_op_het_veld = 0.0 if initial else time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
                 health = 1 / (1 + (tijd_op_het_veld/time_ref)**2)
                 colour = health_to_colour(health=health, scale="g-r", low=144, high=238)
 
+                if tijd_op_het_veld < np.inf:
+                    tijd_op_het_veld = time.strftime("%M:%S", time.gmtime(tijd_op_het_veld)) # format mm:ss
+
                 self.field_buttons[spot].config(bg=colour)
-                self.field_labels[spot].config(bg=colour, text=time.strftime("%M:%S", time.gmtime(tijd_op_het_veld))) # format mm:ss
+                self.field_labels[spot].config(bg=colour, text=tijd_op_het_veld) # format mm:ss
             else:
-                tijd_op_de_bank = np.inf if np.isnan(wedstrijd.spelers.at[speler,"Laatste wijziging"]) else time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
+                tijd_op_de_bank = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
                 health = 1 - 1 / (1 + (tijd_op_de_bank/time_ref)**2)
                 colour = health_to_colour(health=health, scale="g-r", low=200, high=238)
 
                 if tijd_op_de_bank < np.inf:
                     tijd_op_de_bank = time.strftime("%M:%S", time.gmtime(tijd_op_de_bank)) # format mm:ss
-                gespeeld = time.strftime("%M:%S", time.gmtime(wedstrijd.spelers.loc[speler,'Gespeeld'])) # format mm:ss
+                gespeeld = time.strftime("%M:%S", time.gmtime(wedstrijd.spelers.loc[speler,"Gespeeld"])) # format mm:ss
 
                 self.bench_buttons[spot].config(bg=colour)
                 self.bench_labels[spot].config(bg=colour, text=f'Recuperatie: {tijd_op_de_bank}\nGespeeld: {gespeeld}')
@@ -345,34 +354,35 @@ class Dashboard():
         # self.canvas_active.delete("active_selected")
         # self.canvas_bench.delete("bench_selected")
     
-    def start(self):
-        wedstrijd.start(time.time())
+    def unpause(self):
+        wedstrijd.unpause(time.time())
 
         # make the start button a pause button
         self.start_stop_button.config(text="Pauzeer / Beëindig wedstrijd", command=self.pause)
 
     def pause(self):
         tijdstip = time.time()
-        self.paused = True
 
-        def unpause():
-            wedstrijd.add_pause(begin=tijdstip, einde=time.time())
+        def _pause():
+            wedstrijd.pause(tijdstip)
+            self.update_time_features(initial=True)
+            # self.update_time_features()
             popup.destroy()
-            self.paused = False
-            self.update_time_features()
+            
+            # make the pause button a start button
+            self.start_stop_button.config(text="Hervat wedstrijd", command=self.unpause)
         
-        def cancel():
+        def _cancel():
             popup.destroy()
-            self.paused = False
         
         # pop up window asking for confirmation
         popup = tk.Tk()
         popup.wm_title("Pauze")
         label = tk.Label(popup, text="De wedstrijd is gepauzeerd.", font=self.font)
         label.pack(side="top", fill="x", pady=10)
-        resume_button = tk.Button(popup, text="Wedstrijd hervatten", command=unpause, font=self.font)
+        resume_button = tk.Button(popup, text="Bevestigen", command=_pause, font=self.font)
         resume_button.pack()
-        cancel_button = tk.Button(popup, text="Pauze ongedaan maken", command=cancel, font=self.font)
+        cancel_button = tk.Button(popup, text="Pauze ongedaan maken", command=_cancel, font=self.font)
         cancel_button.pack()
         cancel_button = tk.Button(popup, text="Wedstrijd beëindigen", command=lambda: self.end(tijdstip), font=self.font)
         cancel_button.pack()
