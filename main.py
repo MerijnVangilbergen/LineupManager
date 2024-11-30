@@ -5,7 +5,7 @@ import time
 import logging
 
 
-time_ref = 10
+time_ref = 4*60
 
 def configure_grid_uniformly(root):
     # Make sure the columns and rows take up equal space
