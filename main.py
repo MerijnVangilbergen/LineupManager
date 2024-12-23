@@ -101,7 +101,9 @@ class Dashboard():
         # Create main window
         self.root = tk.Tk()
         self.root.attributes("-fullscreen", True)
-        self.font = ("Helvetica", int(14))
+        screen_size = np.asarray([self.root.winfo_screenwidth(), self.root.winfo_screenheight()], dtype=int)
+        scale_factor = screen_size[1] / 1080  # Reference height is 1080px, adjust for others
+        self.font = ("Helvetica", int(14*scale_factor))
 
         # Full screen toggle using esc and f keys
         self.root.bind("<Escape>", lambda event: self.root.attributes("-fullscreen", False))
@@ -203,7 +205,8 @@ class Dashboard():
         
         self.frame_bench = tk.Frame(self.main_frame)
         self.frame_bench.grid(row=1, column=1, sticky="nsew")
-        self.bench_buttons, self.bench_labels = self.init_players(status="Bank", frame=self.frame_bench, size = (60,2))
+        height = 3 if wedstrijd.spelers["Status"].eq("Bank").sum() < 9 else 2
+        self.bench_buttons, self.bench_labels = self.init_players(status="Bank", frame=self.frame_bench, size = (60,height))
 
     def create_absent(self):
         if hasattr(self, 'frame_absent'):
