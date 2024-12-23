@@ -9,4 +9,3 @@ To Do:
     - the evolution of play durations throughout the game
 - The program creates a log file and a summary csv file. If the program is run twice on the same day, it puts both logs in the same file and the second csv overwrites the first csv. To be solved.
 - The log file shows substitutes that happened before the game started. Fix this. Also, substitutions during a pause shouldn't be stored. Only the init line-up when the game starts again.
-- During a break, the time played and recovered should be visualized for the active players

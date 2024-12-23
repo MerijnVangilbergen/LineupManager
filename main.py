@@ -19,41 +19,26 @@ def flip_colour(button):
     new_color = "green" if current_color == "red" else "red"  # Toggle color
     button.config(bg=new_color)
 
-def health_to_colour(health:float, scale:str, low:str, high:str) -> str:
-    if scale == "g-r":
-        rgb = low + (high - low) * np.array([2*(1-health), 2*health, 0])
-    elif scale == "b-r":
-        rgb = low + (high - low) * np.array([2*(1-health), 0, 2*health])
-    else:
-        raise ValueError("Invalid scale. Should be 'g-r' or 'b-r'.")
+def health_to_colour(health:float, low:str, high:str) -> str:
+    rgb = low + (high - low) * np.array([2*(1-health), 2*health, 0])
     rgb = np.clip(np.asarray(rgb, dtype=int), low, high)
     hex = f'#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}'
     return hex
 
 
 class Wedstrijd:
-    def __init__(self, selected):
+    def __init__(self, spelers):
         # Set up logging configuration
         today = time.strftime("%Y-%m-%d")
         logging.basicConfig(filename=f'wedstrijd_{today}.log', 
                             level=logging.INFO, 
                             format='%(asctime)s - %(levelname)s - %(message)s')
-        self.log_function_call("__init__", selected)
+        self.log_function_call("__init__", spelers)
     
         # Create a DataFrame to keep track of the players
-        self.spelers = pd.DataFrame(index=selected.keys())
-        self.spelers["Status"] = np.where(list(selected.values()), "Bank", "Afwezig")
-        actief_idx = self.spelers[self.spelers["Status"] == "Bank"].head(5).index
-        self.spelers.loc[actief_idx, "Status"] = "Actief"
-
-        self.spelers["Spot"] = 0
-        mask_actief = self.spelers["Status"] == "Actief"
-        mask_bank = self.spelers["Status"] == "Bank"
-        mask_afwezig = self.spelers["Status"] == "Afwezig"
-        self.spelers.loc[mask_actief, "Spot"] = np.arange(mask_actief.sum())
-        self.spelers.loc[mask_bank, "Spot"] = np.arange(mask_bank.sum())
-        self.spelers.loc[mask_afwezig, "Spot"] = np.arange(mask_afwezig.sum())
-        
+        self.spelers = pd.DataFrame(index=spelers)
+        self.spelers["Status"] = np.concatenate((5*["Actief"], (len(spelers)-5)*["Bank"]))
+        self.spelers["Spot"] = np.concatenate((np.arange(5), np.arange(len(spelers)-5)))
         self.spelers["Gespeeld"] = 0.0
         self.spelers["Laatste wijziging"] = -np.inf
         
@@ -64,25 +49,25 @@ class Wedstrijd:
         logging.info(f'{function_name}({args})')
     
     def unpause(self, tijdstip):
-        self.log_function_call("unpause")
+        self.log_function_call("unpause", tijdstip)
         self.paused = False
         self.spelers.loc[self.spelers["Status"] == "Actief", "Laatste wijziging"] = tijdstip
 
     def pause(self, tijdstip):
-        self.log_function_call("pause")
+        self.log_function_call("pause", tijdstip)
         self.paused = True
         self.spelers.loc[self.spelers["Status"] == "Actief", "Gespeeld"] += tijdstip - self.spelers.loc[self.spelers["Status"] == "Actief", "Laatste wijziging"]
         self.spelers.loc[self.spelers["Status"] == "Actief", "Laatste wijziging"] = tijdstip
     
     def end(self, tijdstip):
-        self.log_function_call("end")
+        self.log_function_call("end", tijdstip)
         self.spelers.loc[self.spelers["Status"] == "Actief", "Gespeeld"] += tijdstip - self.spelers.loc[self.spelers["Status"] == "Actief", "Laatste wijziging"]
         self.spelers["Laatste wijziging"] = tijdstip
         self.spelers["Gespeeld"] = [time.strftime("%M:%S", time.gmtime(tijd)) for tijd in self.spelers["Gespeeld"]] # format mm:ss
         self.spelers["Gespeeld"].to_csv('wedstrijdoverzicht.csv')
 
     def wissel(self, speler_uit, speler_in, tijdstip):
-        self.log_function_call("wissel", speler_uit, speler_in)
+        self.log_function_call("wissel", speler_uit, speler_in, tijdstip)
 
         # naar de bank
         self.spelers.at[speler_uit, "Status"] = "Bank"
@@ -107,63 +92,6 @@ class Wedstrijd:
         self.spelers.loc[bench.index[argsort], "Spot"] = np.arange(len(bench))
 
 
-class PlayerSelector:
-    def __init__(self, selectie=None):
-        # Create main window
-        self.root = tk.Tk()
-        self.root.attributes("-fullscreen", True)
-
-        # Full screen toggle using esc and f keys
-        self.root.bind("<Escape>", lambda event: self.root.attributes("-fullscreen", False))
-        self.root.bind("f", lambda event: self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen")))
-        
-        # Keep track of sizes
-        ncols = 4
-
-        # Create a selection button for each player
-        self.init_players(ncols=ncols, button_size=(30,4), font=("Helvetica", int(18)), selectie=selectie)
-
-        # add the proceed button in a new row
-        proceed_button = tk.Button(self.root, 
-                                   text="Ga verder", 
-                                   font=("Helvetica", int(18)), 
-                                   width=60, 
-                                   height=4, 
-                                   command=self.ga_verder)
-        proceed_button.grid(row=np.ceil(len(self.player_buttons) / ncols).astype(int), columnspan=ncols)
-
-        configure_grid_uniformly(self.root)
-        self.root.mainloop()
-
-    def init_players(self, ncols:int, button_size:tuple|list|np.ndarray, font, selectie:list=None):
-        spelers = np.loadtxt('spelers.txt', dtype=str, delimiter=',')
-        if selectie is None:
-            selected = np.ones(len(spelers), dtype=bool)
-        else:
-            selected = np.isin(spelers, selectie)
-
-        self.player_buttons = []
-        for ss, speler in enumerate(spelers):
-            button = tk.Button( self.root, 
-                                text=speler, 
-                                font=font, 
-                                width=button_size[0], 
-                                height=button_size[1], 
-                                relief=tk.FLAT, 
-                                bg='green' if selected[ss] else 'red')
-            button.config(command=lambda button=button: flip_colour(button))
-            button.grid(row=ss // ncols, column=ss % ncols)
-            self.player_buttons.append(button)
-
-        configure_grid_uniformly(self.root)
-
-    def ga_verder(self):
-        # Capture the player selection and close the window
-        self.selected = {button.cget("text"): (button.cget("bg") == "green") for button in self.player_buttons}
-        self.root.destroy()
-        self.root.quit()
-
-
 class Dashboard():
     def __init__(self):
         self.active_selection = None
@@ -184,7 +112,7 @@ class Dashboard():
         self.init_extra_frame_left()
 
         # Initial display update and run the main loop
-        self.update_time_features(initial=True)
+        self.update_time_features()
         self.refresh_dashboard()
         self.root.mainloop()
 
@@ -207,7 +135,7 @@ class Dashboard():
         # The active players
         frame_active = tk.Frame(self.main_frame)
         frame_active.grid(row=1, column=0, sticky="nsew")
-        self.field_buttons, self.field_labels = self.init_players(status="Actief", frame=frame_active, size = (60,4))
+        self.field_buttons, self.field_labels = self.init_players(status="Actief", frame=frame_active, size = (70,4))
 
         # The bench players
         self.create_bench()
@@ -275,7 +203,7 @@ class Dashboard():
         
         self.frame_bench = tk.Frame(self.main_frame)
         self.frame_bench.grid(row=1, column=1, sticky="nsew")
-        self.bench_buttons, self.bench_labels = self.init_players(status="Bank", frame=self.frame_bench, size = (50,2))
+        self.bench_buttons, self.bench_labels = self.init_players(status="Bank", frame=self.frame_bench, size = (60,2))
 
     def create_absent(self):
         if hasattr(self, 'frame_absent'):
@@ -320,32 +248,41 @@ class Dashboard():
         self.update_time_features()
         self.root.after(1000, self.refresh_dashboard)  # Schedule the next refresh after 1 second
 
-    def update_time_features(self, initial=False):
+    def update_time_features(self):
         ''' Update all time dependent features: time labels and colours '''
         for speler, spot in zip(wedstrijd.spelers.index, wedstrijd.spelers['Spot']):
             if wedstrijd.spelers.at[speler,"Status"] == "Actief":
-                if wedstrijd.paused and not initial:
-                    continue
-                tijd_op_het_veld = 0.0 if initial else time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
-                health = 1 / (1 + (tijd_op_het_veld/time_ref)**2)
-                colour = health_to_colour(health=health, scale="g-r", low=144, high=238)
-
-                if tijd_op_het_veld < np.inf:
-                    tijd_op_het_veld = time.strftime("%M:%S", time.gmtime(tijd_op_het_veld)) # format mm:ss
-
-                self.field_buttons[spot].config(bg=colour)
-                self.field_labels[spot].config(bg=colour, text=tijd_op_het_veld) # format mm:ss
-            elif wedstrijd.spelers.at[speler,"Status"] == "Bank":
-                tijd_op_de_bank = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
-                health = 1 - 1 / (1 + (tijd_op_de_bank/time_ref)**2)
-                colour = health_to_colour(health=health, scale="g-r", low=200, high=238)
-
-                if tijd_op_de_bank < np.inf:
+                if wedstrijd.spelers.at[speler,"Laatste wijziging"] == -np.inf:
+                    health = 1
+                    text = ''
+                elif wedstrijd.paused:
+                    tijd_op_de_bank = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
+                    health = 1 - 1 / (1 + (tijd_op_de_bank/time_ref)**2)
                     tijd_op_de_bank = time.strftime("%M:%S", time.gmtime(tijd_op_de_bank)) # format mm:ss
-                gespeeld = time.strftime("%M:%S", time.gmtime(wedstrijd.spelers.loc[speler,"Gespeeld"])) # format mm:ss
+                    gespeeld = time.strftime("%M:%S", time.gmtime(wedstrijd.spelers.loc[speler,"Gespeeld"])) # format mm:ss
+                    text = f'Recuperatie: {tijd_op_de_bank}\nGespeeld: {gespeeld}'
+                else:
+                    tijd_op_het_veld = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
+                    health = 1 / (1 + (tijd_op_het_veld/time_ref)**2)
+                    text = time.strftime("%M:%S", time.gmtime(tijd_op_het_veld)) # format mm:ss
 
+                colour = health_to_colour(health=health, low=144, high=238)
+                self.field_buttons[spot].config(bg=colour)
+                self.field_labels[spot].config(bg=colour, text=text)
+            elif wedstrijd.spelers.at[speler,"Status"] == "Bank":
+                if wedstrijd.spelers.at[speler,"Laatste wijziging"] == -np.inf:
+                    health = 1
+                    text = ''
+                else:
+                    tijd_op_de_bank = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
+                    health = 1 - 1 / (1 + (tijd_op_de_bank/time_ref)**2)
+                    tijd_op_de_bank = time.strftime("%M:%S", time.gmtime(tijd_op_de_bank)) # format mm:ss
+                    gespeeld = time.strftime("%M:%S", time.gmtime(wedstrijd.spelers.loc[speler,"Gespeeld"])) # format mm:ss
+                    text = f'Recuperatie: {tijd_op_de_bank}\nGespeeld: {gespeeld}'
+
+                colour = health_to_colour(health=health, low=200, high=238)
                 self.bench_buttons[spot].config(bg=colour)
-                self.bench_labels[spot].config(bg=colour, text=f'Recuperatie: {tijd_op_de_bank}\nGespeeld: {gespeeld}')
+                self.bench_labels[spot].config(bg=colour, text=text)
     
     def update_bench_names(self):
         inactief = wedstrijd.spelers.loc[wedstrijd.spelers["Status"] == "Bank"]
@@ -451,6 +388,7 @@ class Dashboard():
 
     def unpause(self):
         wedstrijd.unpause(time.time())
+        self.update_time_features()
 
         # make the start button a pause button
         self.start_stop_button.config(text="Pauzeer / Beëindig wedstrijd", command=self.pause)
@@ -460,7 +398,7 @@ class Dashboard():
 
         def _pause():
             wedstrijd.pause(tijdstip)
-            self.update_time_features(initial=True)
+            self.update_time_features()
             popup.destroy()
             
             # make the pause button a start button
@@ -499,8 +437,6 @@ class Dashboard():
 
 
 # Example usage
-player_selector = PlayerSelector()
-selected = player_selector.selected
-
-wedstrijd = Wedstrijd(selected)
+spelers = np.loadtxt('spelers.txt', dtype=str, delimiter=',')
+wedstrijd = Wedstrijd(spelers)
 dashboard = Dashboard()
