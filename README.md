@@ -3,9 +3,6 @@ This is a GUI to manage the lineup in sport games (in this case futsal, but can 
 The language used in this program is a mixture of English and Dutch.
 
 To Do:
-- When we reached half-time or the end of the game, I didn't have any visuals to show. I could generate
-    - a pie chart of minutes played 
-    - or a histogram of play durations
-    - the evolution of play durations throughout the game
-- The program creates a log file and a summary csv file. If the program is run twice on the same day, it puts both logs in the same file and the second csv overwrites the first csv. To be solved.
-- The log file shows substitutes that happened before the game started. Fix this. Also, substitutions during a pause shouldn't be stored. Only the init line-up when the game starts again.
+- Make sure that no 2 outliers in speelbeurten are removed if the second half hasn't started yet.
+- Allow to load an instance of wedstrijd from the history.
+- Incorporate history line in dashboard and allow for edits.

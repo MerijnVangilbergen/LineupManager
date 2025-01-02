@@ -1,8 +1,10 @@
 import tkinter as tk
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from copy import deepcopy as copy
 import time
-import logging
 
 
 time_ref = 4*60
@@ -14,26 +16,27 @@ def configure_grid_uniformly(root):
     for i in range(root.grid_size()[1]):
         root.grid_rowconfigure(i, weight=1)
 
-def flip_colour(button):
-    current_color = button.cget("bg")  # Get current background color
-    new_color = "green" if current_color == "red" else "red"  # Toggle color
-    button.config(bg=new_color)
-
 def health_to_colour(health:float, low:str, high:str) -> str:
     rgb = low + (high - low) * np.array([2*(1-health), 2*health, 0])
     rgb = np.clip(np.asarray(rgb, dtype=int), low, high)
     hex = f'#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}'
     return hex
 
+def time_to_string(t:float) -> str:
+    # Convert time in seconds to a string in the format mm:ss (without leading zero).
+    t = np.round(t)
+    t_as_string = time.strftime("%M:%S", time.gmtime(t))
+    if t_as_string[0] == '0':
+        t_as_string = t_as_string[1:] # remove leading zero
+    return t_as_string
+
 
 class Wedstrijd:
     def __init__(self, spelers):
-        # Set up logging configuration
-        today = time.strftime("%Y-%m-%d")
-        logging.basicConfig(filename=f'wedstrijd_{today}.log', 
-                            level=logging.INFO, 
-                            format='%(asctime)s - %(levelname)s - %(message)s')
-        self.log_function_call("__init__", spelers)
+        # Create a history list to keep track of the game
+        self.history = []
+        with open("history.txt", "w") as file:
+            file.write("")
     
         # Create a DataFrame to keep track of the players
         self.spelers = pd.DataFrame(index=spelers)
@@ -44,30 +47,21 @@ class Wedstrijd:
         
         self.paused = True
     
-    def log_function_call(self, function_name, *args):
-        """Logs the function calls with their arguments."""
-        logging.info(f'{function_name}({args})')
-    
     def unpause(self, tijdstip):
-        self.log_function_call("unpause", tijdstip)
+        actieve_spelers = self.spelers.loc[self.spelers["Status"] == "Actief"].sort_values(by="Spot").index.values
+        self.history.append(HistoryItem(type='unpause', time=tijdstip, spelers=actieve_spelers))
         self.paused = False
         self.spelers.loc[self.spelers["Status"] == "Actief", "Laatste wijziging"] = tijdstip
 
     def pause(self, tijdstip):
-        self.log_function_call("pause", tijdstip)
+        self.history.append(HistoryItem(type='pause', time=tijdstip))
         self.paused = True
         self.spelers.loc[self.spelers["Status"] == "Actief", "Gespeeld"] += tijdstip - self.spelers.loc[self.spelers["Status"] == "Actief", "Laatste wijziging"]
         self.spelers.loc[self.spelers["Status"] == "Actief", "Laatste wijziging"] = tijdstip
     
-    def end(self, tijdstip):
-        self.log_function_call("end", tijdstip)
-        self.spelers.loc[self.spelers["Status"] == "Actief", "Gespeeld"] += tijdstip - self.spelers.loc[self.spelers["Status"] == "Actief", "Laatste wijziging"]
-        self.spelers["Laatste wijziging"] = tijdstip
-        self.spelers["Gespeeld"] = [time.strftime("%M:%S", time.gmtime(tijd)) for tijd in self.spelers["Gespeeld"]] # format mm:ss
-        self.spelers["Gespeeld"].to_csv('wedstrijdoverzicht.csv')
-
     def wissel(self, speler_uit, speler_in, tijdstip):
-        self.log_function_call("wissel", speler_uit, speler_in, tijdstip)
+        if not self.paused:
+            self.history.append(HistoryItem(type='wissel', time=tijdstip, speler_uit=speler_uit, speler_in=speler_in))
 
         # naar de bank
         self.spelers.at[speler_uit, "Status"] = "Bank"
@@ -91,6 +85,140 @@ class Wedstrijd:
         argsort = bench["Gespeeld"].argsort()
         self.spelers.loc[bench.index[argsort], "Spot"] = np.arange(len(bench))
 
+    def report(self, save=False):
+        if not self.paused:
+            self_ = copy(self)
+            self_.pause(tijdstip=time.time())
+            return self_.report(save=save)
+
+        def draw_bar(idx, speler, start, end):
+            ax_history.barh(y = idx, 
+                            left = start, 
+                            width = end - start, 
+                            label = speler, 
+                            color = spelers.at[speler, 'Colour'])
+            ax_history.text(x = (start + end)/2, 
+                            y = idx, 
+                            s = f'{speler}\n{time_to_string(end - start)}', 
+                            ha = 'center', 
+                            va = 'center', 
+                            color = 'k')
+
+        def verwijder_keeper_outliers(spelers):
+            alle_speelduren = np.concatenate(spelers['Speelduren'].values)
+            argmax = np.argmax(alle_speelduren)
+            max1 = alle_speelduren[argmax]
+            other = np.delete(alle_speelduren, argmax)
+            argmax = np.argmax(other)
+            max2 = other[argmax]
+            other = np.delete(other, argmax)
+
+            # Two outliers are expected from the goalkeeper. Remove them.
+            mu, sigma = np.mean(other), np.std(other, ddof=1)
+            if max2 > mu + 2*sigma:
+                outlier = max2
+            elif max1 > mu + 2*sigma:
+                outlier = max1
+            else:
+                outlier = np.inf
+
+            # remove outliers
+            for speler in spelers.index:
+                inliers = spelers.at[speler,'Speelduren'] < outlier
+                if np.all(inliers):
+                    continue
+                spelers.at[speler,'Speelbeurten_begin'] = np.array(spelers.at[speler,'Speelbeurten_begin'])[inliers]
+                spelers.at[speler,'Speelbeurten_einde'] = np.array(spelers.at[speler,'Speelbeurten_einde'])[inliers]
+                spelers.at[speler,'Speelduren'] = spelers.at[speler,'Speelduren'][inliers]
+                spelers.at[speler,'Gespeeld'] = np.sum(spelers.at[speler,'Speelduren'])
+
+        def hbar_total_time_per_player(spelers, ax):
+            ax.set_xlabel('Totale speeltijd per speler')
+            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: time_to_string(x)))
+            ax.invert_yaxis()
+            ax.yaxis.set_visible(False)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.spines['left'].set_visible(False)
+            container = ax.barh(y = spelers.index, 
+                                width = spelers['Gespeeld'], 
+                                color = spelers['Colour'])
+            ax.bar_label(container, labels=[f'{speler} - {time_to_string(gespeeld)}' for speler, gespeeld in zip(spelers.index, spelers['Gespeeld'])], label_type='center')
+
+        def hist_playtimes_per_player(spelers, ax):
+            ax.set_xlabel('Duur per speelbeurt')
+            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: time_to_string(x)))
+            ax.yaxis.set_visible(False)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.spines['left'].set_visible(False)
+            ax.hist(x = spelers['Speelduren'].values, 
+                    color = spelers['Colour'], 
+                    stacked=True, density=True)
+
+        def scatter_playdur_evolution(spelers, ax):
+            ax.set_xlabel('Tijd')
+            ax.set_ylabel('Duur speelbeurt')
+
+            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: time.strftime("%H:%M", time.gmtime(np.round(x)))))
+            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: time_to_string(y)))
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+
+            for speler in spelers.index:
+                ax.scatter( spelers.at[speler, 'Speelbeurten_begin'], 
+                            spelers.at[speler, 'Speelduren'], 
+                            color = spelers.at[speler, 'Colour'])
+
+        spelers = copy(self.spelers)
+        spelers['Colour'] = plt.cm.tab20.colors[:len(spelers)]
+        spelers['Speelbeurten_begin'] = [[] for _ in range(len(spelers))]
+        spelers['Speelbeurten_einde'] = [[] for _ in range(len(spelers))]
+        spelers.sort_values(by='Gespeeld', inplace=True)
+
+        fig = plt.figure()
+        manager = plt.get_current_fig_manager()
+        manager.full_screen_toggle()
+        gs = fig.add_gridspec(3,2)
+        ax_history = fig.add_subplot(gs[0,:])
+        ax_time_per_player = fig.add_subplot(gs[1:,0])
+        ax_playdur_distr = fig.add_subplot(gs[1,1])
+        ax_playdur_evolution = fig.add_subplot(gs[2,1])
+
+        ax_history.invert_yaxis()
+        ax_history.axis('off')
+
+        for HI in self.history:
+            if HI.type == 'unpause':
+                actieve_spelers = copy(HI.spelers)
+                tijden = np.repeat(HI.time, len(actieve_spelers))
+            elif HI.type == 'pause':
+                for idx, speler in enumerate(actieve_spelers):
+                    draw_bar(idx, speler, tijden[idx], HI.time)
+                    spelers.at[speler, 'Speelbeurten_begin'].append(tijden[idx])
+                    spelers.at[speler, 'Speelbeurten_einde'].append(HI.time)
+            elif HI.type == 'wissel':
+                speler = HI.speler_uit
+                idx = int(np.argwhere(actieve_spelers == speler)[0][0])
+                draw_bar(idx, speler, tijden[idx], HI.time)
+                spelers.at[speler, 'Speelbeurten_begin'].append(tijden[idx])
+                spelers.at[speler, 'Speelbeurten_einde'].append(HI.time)
+                actieve_spelers[idx] = HI.speler_in
+                tijden[idx] = HI.time
+
+        spelers['Speelduren'] = [np.array(einde) - np.array(begin) for begin, einde in zip(spelers['Speelbeurten_begin'], spelers['Speelbeurten_einde'])]
+        verwijder_keeper_outliers(spelers)
+        spelers = spelers.loc[spelers['Gespeeld'] > 0]
+
+        hbar_total_time_per_player(spelers=spelers, ax=ax_time_per_player)
+        hist_playtimes_per_player(spelers, ax=ax_playdur_distr)
+        scatter_playdur_evolution(spelers, ax=ax_playdur_evolution)
+
+        if save:
+            plt.show()
+            fig.savefig('wedstrijdoverzicht.png')
+        return fig
+
 
 class Dashboard():
     def __init__(self):
@@ -109,9 +237,10 @@ class Dashboard():
         self.root.bind("<Escape>", lambda event: self.root.attributes("-fullscreen", False))
         self.root.bind("f", lambda event: self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen")))
 
-        # Initialize the main frame and the extra frame on the left
+        # Initialize the main frame and the extra frames
         self.init_main_frame()
         self.init_extra_frame_left()
+        self.init_extra_frame_right()
 
         # Initial display update and run the main loop
         self.update_time_features()
@@ -127,6 +256,17 @@ class Dashboard():
         self.main_frame.grid_rowconfigure(0, weight=1)
         self.main_frame.grid_rowconfigure(1, weight=5)
         self.main_frame.grid_rowconfigure(2, weight=1)
+
+        # Buttons to open the extra frames
+        self.open_left_button = tk.Button(self.main_frame, 
+                                          text=">", font=self.font, 
+                                          bg='lightgrey', relief=tk.FLAT, width=2, height=50, 
+                                          command=lambda: self.extra_frame_left.lift())
+        self.open_left_button.place(relx=0, rely=0.5, anchor='w')
+        self.open_right_button = tk.Button(self.main_frame, text="<", font=self.font, 
+                                           bg='lightgrey', relief=tk.FLAT, width=2, height=50, 
+                                           command=lambda: self.extra_frame_right.lift())
+        self.open_right_button.place(relx=1, rely=0.5, anchor='e')
 
         # Create subtitles for active players and bench players
         field_label = tk.Label(self.main_frame, text="Het veld", font=self.font)
@@ -155,9 +295,8 @@ class Dashboard():
         self.start_stop_button.grid(row=0, column=2)
         configure_grid_uniformly(bottom_frame)
         
-        # Button to open the extra frame on the left
-        self.open_left_button = tk.Button(self.main_frame, text=">", bg='lightgrey', command=lambda: self.extra_frame_left.lift(), font=self.font, width=2, height=50)
-        self.open_left_button.place(relx=0, rely=0.5, anchor='w')
+        self.open_left_button.lift() # make sure the open button is on top
+        self.open_right_button.lift() # make sure the open button is on top
     
     def init_extra_frame_left(self):
         # Extra frame to keep the absent players
@@ -168,36 +307,66 @@ class Dashboard():
         self.extra_frame_left.grid_rowconfigure(2, weight=1)
         self.extra_frame_left.grid_columnconfigure(0, weight=1)
 
-        # Button to close this extra frame
-        self.close_left_button = tk.Button(self.extra_frame_left, 
-                                           text="<", font=self.font, 
-                                           bg='lightgrey', 
-                                           command=lambda: self.extra_frame_left.lower(), 
-                                           width=2, height=50)
-        self.close_left_button.place(relx=1, rely=0.5, anchor='e')
-
         # Label
         absent_label = tk.Label(self.extra_frame_left, text="Afwezig", font=self.font, bg='lightgrey')
         absent_label.grid(row=0, column=0, sticky="nsew")
 
-        # The absent players
-        self.create_absent()
-
         # Action buttons
-        extra_bottom_frame = tk.Frame(self.extra_frame_left, bg='lightgrey')
-        extra_bottom_frame.grid(row=2, column=0, sticky="nsew")
-        swap_to_open_left_button = tk.Button(extra_bottom_frame, 
-                                             text="<=", font=self.font, 
-                                             command=self.move_to_absent, 
-                                             width=10, height=3)
-        swap_to_open_left_button.place(relx=.25, rely=.5, anchor='center')
-        swap_to_bench_button = tk.Button(extra_bottom_frame, 
+        extra_left_bottom_frame = tk.Frame(self.extra_frame_left, bg='lightgrey')
+        extra_left_bottom_frame.grid(row=2, column=0, sticky="nsew")
+        swap_to_absent_button = tk.Button(extra_left_bottom_frame, 
+                                          text="<=", font=self.font, 
+                                          command=self.move_to_absent, 
+                                          width=10, height=3)
+        swap_to_absent_button.place(relx=.25, rely=.5, anchor='center')
+        swap_to_bench_button = tk.Button(extra_left_bottom_frame, 
                                          text="=>", font=self.font,
                                          command=self.move_to_bench, 
                                          width=10, height=3)
         swap_to_bench_button.place(relx=.75, rely=.5, anchor='center')
         
+        # Button to close this extra frame
+        self.close_left_button = tk.Button(self.extra_frame_left, 
+                                           text='<', font=self.font, 
+                                           bg='lightgrey', relief=tk.GROOVE, width=2, height=50, 
+                                           command=lambda: self.extra_frame_left.lower())
+        self.close_left_button.place(relx=1, rely=0.5, anchor='e')
+
+        # The absent players
+        self.create_absent()
+
         self.extra_frame_left.lower()
+
+    def init_extra_frame_right(self):
+        # Extra frame to keep the absent players
+        self.extra_frame_right = tk.Frame(self.root, bg='lightgrey')
+        self.extra_frame_right.place(relx=1, rely=0, relwidth=.25, relheight=1, anchor='ne')
+        self.extra_frame_right.grid_rowconfigure(0, weight=1)
+        self.extra_frame_right.grid_rowconfigure(1, weight=5)
+        self.extra_frame_right.grid_rowconfigure(2, weight=1)
+        self.extra_frame_right.grid_columnconfigure(0, weight=1)
+
+        # Label
+        history_label = tk.Label(self.extra_frame_right, text="History", font=self.font, bg='lightgrey')
+        history_label.grid(row=0, column=0, sticky="nsew")
+
+        # Report button
+        extra_right_bottom_frame = tk.Frame(self.extra_frame_right, bg='lightgrey')
+        extra_right_bottom_frame.grid(row=2, column=0, sticky="nsew")
+        history_report_button = tk.Button(extra_right_bottom_frame, 
+                                          text="Open report", font=self.font, 
+                                          width=10, height=3, 
+                                          command=self.open_report)
+        history_report_button.place(relx=.5, rely=.5, anchor='center')
+        
+        # Button to close this extra frame
+        self.close_right_button = tk.Button(self.extra_frame_right, 
+                                           text='>', font=self.font, 
+                                           bg='lightgrey', relief=tk.GROOVE, width=2, height=50,
+                                           command=lambda: self.extra_frame_right.lower())
+        self.close_right_button.place(relx=0, rely=0.5, anchor='w')
+
+        self.extra_frame_right.lower()
 
     def create_bench(self):
         if hasattr(self, 'frame_bench'):
@@ -207,6 +376,7 @@ class Dashboard():
         self.frame_bench.grid(row=1, column=1, sticky="nsew")
         height = 3 if wedstrijd.spelers["Status"].eq("Bank").sum() < 9 else 2
         self.bench_buttons, self.bench_labels = self.init_players(status="Bank", frame=self.frame_bench, size = (60,height))
+        self.open_right_button.lift() # make sure the open button is on top
 
     def create_absent(self):
         if hasattr(self, 'frame_absent'):
@@ -254,34 +424,27 @@ class Dashboard():
     def update_time_features(self):
         ''' Update all time dependent features: time labels and colours '''
         for speler, spot in zip(wedstrijd.spelers.index, wedstrijd.spelers['Spot']):
+            t = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
             if wedstrijd.spelers.at[speler,"Status"] == "Actief":
-                if wedstrijd.spelers.at[speler,"Laatste wijziging"] == -np.inf:
+                if t == np.inf:
                     health = 1
                     text = ''
                 elif wedstrijd.paused:
-                    tijd_op_de_bank = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
-                    health = 1 - 1 / (1 + (tijd_op_de_bank/time_ref)**2)
-                    tijd_op_de_bank = time.strftime("%M:%S", time.gmtime(tijd_op_de_bank)) # format mm:ss
-                    gespeeld = time.strftime("%M:%S", time.gmtime(wedstrijd.spelers.loc[speler,"Gespeeld"])) # format mm:ss
-                    text = f'Recuperatie: {tijd_op_de_bank}\nGespeeld: {gespeeld}'
+                    health = 1 - 1 / (1 + (t/time_ref)**2)
+                    text = f'Recuperatie: {time_to_string(t)}\nGespeeld: {(time_to_string(wedstrijd.spelers.loc[speler,"Gespeeld"]))}'
                 else:
-                    tijd_op_het_veld = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
-                    health = 1 / (1 + (tijd_op_het_veld/time_ref)**2)
-                    text = time.strftime("%M:%S", time.gmtime(tijd_op_het_veld)) # format mm:ss
+                    health = 1 / (1 + (t/time_ref)**2)
+                    text = time_to_string(t)
 
                 colour = health_to_colour(health=health, low=144, high=238)
                 self.field_buttons[spot].config(bg=colour)
                 self.field_labels[spot].config(bg=colour, text=text)
             elif wedstrijd.spelers.at[speler,"Status"] == "Bank":
-                if wedstrijd.spelers.at[speler,"Laatste wijziging"] == -np.inf:
-                    health = 1
+                health = 1 - 1 / (1 + (t/time_ref)**2)
+                if t == np.inf:
                     text = ''
                 else:
-                    tijd_op_de_bank = time.time() - wedstrijd.spelers.at[speler,"Laatste wijziging"]
-                    health = 1 - 1 / (1 + (tijd_op_de_bank/time_ref)**2)
-                    tijd_op_de_bank = time.strftime("%M:%S", time.gmtime(tijd_op_de_bank)) # format mm:ss
-                    gespeeld = time.strftime("%M:%S", time.gmtime(wedstrijd.spelers.loc[speler,"Gespeeld"])) # format mm:ss
-                    text = f'Recuperatie: {tijd_op_de_bank}\nGespeeld: {gespeeld}'
+                    text = f'Recuperatie: {time_to_string(t)}\nGespeeld: {time_to_string(wedstrijd.spelers.loc[speler,"Gespeeld"])}'
 
                 colour = health_to_colour(health=health, low=200, high=238)
                 self.bench_buttons[spot].config(bg=colour)
@@ -419,12 +582,15 @@ class Dashboard():
         resume_button.pack()
         cancel_button = tk.Button(popup, text="Pauze ongedaan maken", command=_cancel, font=self.font, width=25, height=2)
         cancel_button.pack()
-        cancel_button = tk.Button(popup, text="Wedstrijd beëindigen", command=lambda: self.end(tijdstip), font=self.font, width=25, height=2)
+        cancel_button = tk.Button(popup, text="Wedstrijd beëindigen", command=lambda: self.end(popup,tijdstip), font=self.font, width=25, height=2)
         cancel_button.pack()
         
-    def end(self, tijdstip):
+    def end(self, popup, tijdstip):
+        popup.destroy()
+        
         def end_game():
-            wedstrijd.end(tijdstip)
+            wedstrijd.pause(tijdstip)
+            popup.destroy()
             self.root.destroy()
             self.root.quit()
         
@@ -433,13 +599,50 @@ class Dashboard():
         popup.wm_title("Einde wedstrijd")
         label = tk.Label(popup, text="Wedstrijd beëindigen?", font=self.font)
         label.pack(side="top", fill="x", pady=10)
-        yes_button = tk.Button(popup, text="Ja", command=end_game, font=self.font)
-        yes_button.pack()
-        no_button = tk.Button(popup, text="Nee", command=popup.destroy, font=self.font)
-        no_button.pack()
+        tk.Button(popup, text="Ja", command=end_game, font=self.font).pack()
+        tk.Button(popup, text="Nee", command=popup.destroy, font=self.font).pack()
+
+    def open_report(self):
+        if wedstrijd.paused and wedstrijd.spelers["Gespeeld"].sum() == 0:
+            return
+        fig = wedstrijd.report()
+        root = tk.Tk()
+        root.geometry(f"{root.winfo_screenwidth()}x{root.winfo_screenheight()}+0+0")
+        canvas = FigureCanvasTkAgg(fig, master=root)
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        plt.close()
+
+
+class HistoryItem:
+    def __init__(self, type:str, time, spelers=None, speler_uit=None, speler_in=None):
+        if type == 'unpause':
+            assert (spelers is not None) and (speler_uit is None) and (speler_in is None)
+            self.spelers = spelers
+        elif type == 'pause':
+            assert (spelers is None) and (speler_uit is None) and (speler_in is None)
+        elif type == 'wissel':
+            assert (spelers is None) and (speler_uit is not None) and (speler_in is not None)
+            self.speler_uit = speler_uit
+            self.speler_in = speler_in
+        else:
+            raise ValueError(f"Invalid type. Type should be 'Wissel', 'pause' or 'unpause', not {type}.")
+        self.type = type
+        self.time = time
+        self.log()
+
+    def log(self):
+        with open("history.txt", "a") as file:
+            datetime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.time))
+            if self.type == 'unpause':
+                file.write(f"{datetime}: unpause(spelers = {', '.join(self.spelers)})\n")
+            elif self.type == 'pause':
+                file.write(f"{datetime}: pause\n")
+            elif self.type == 'wissel':
+                file.write(f"{datetime}: wissel(speler_uit={self.speler_uit}, speler_in={self.speler_in})\n")
 
 
 # Example usage
 spelers = np.loadtxt('spelers.txt', dtype=str, delimiter=',')
 wedstrijd = Wedstrijd(spelers)
 dashboard = Dashboard()
+wedstrijd.report(save=True)
