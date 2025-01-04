@@ -91,6 +91,19 @@ class Wedstrijd:
             self_.pause(tijdstip=time.time())
             return self_.report(save=save)
 
+        spelers = copy(self.spelers)
+        spelers['Colour'] = plt.cm.tab20.colors[:len(spelers)]
+        spelers['Speelbeurten_begin'] = [[] for _ in range(len(spelers))]
+        spelers['Speelbeurten_einde'] = [[] for _ in range(len(spelers))]
+        spelers.sort_values(by='Gespeeld', inplace=True)
+
+        fig = plt.figure()
+        manager = plt.get_current_fig_manager()
+        manager.full_screen_toggle()
+        fig_height = fig.get_size_inches()[1] * fig.dpi
+        print(f'fig_height: {fig_height}')
+        textsize = fig_height/480 * 10
+
         def draw_bar(idx, speler, start, end):
             ax_history.barh(y = idx, 
                             left = start, 
@@ -100,6 +113,7 @@ class Wedstrijd:
             ax_history.text(x = (start + end)/2, 
                             y = idx, 
                             s = f'{speler}\n{time_to_string(end - start)}', 
+                            size = textsize,
                             ha = 'center', 
                             va = 'center', 
                             color = 'k')
@@ -170,15 +184,6 @@ class Wedstrijd:
                             spelers.at[speler, 'Speelduren'], 
                             color = spelers.at[speler, 'Colour'])
 
-        spelers = copy(self.spelers)
-        spelers['Colour'] = plt.cm.tab20.colors[:len(spelers)]
-        spelers['Speelbeurten_begin'] = [[] for _ in range(len(spelers))]
-        spelers['Speelbeurten_einde'] = [[] for _ in range(len(spelers))]
-        spelers.sort_values(by='Gespeeld', inplace=True)
-
-        fig = plt.figure()
-        manager = plt.get_current_fig_manager()
-        manager.full_screen_toggle()
         gs = fig.add_gridspec(3,2)
         ax_history = fig.add_subplot(gs[0,:])
         ax_time_per_player = fig.add_subplot(gs[1:,0])
@@ -186,6 +191,7 @@ class Wedstrijd:
         ax_playdur_evolution = fig.add_subplot(gs[2,1])
 
         ax_history.invert_yaxis()
+        ax_history.set_xlim(self.history[0].time, self.history[-1].time)
         ax_history.axis('off')
 
         for HI in self.history:
