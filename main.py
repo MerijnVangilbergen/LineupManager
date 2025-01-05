@@ -5,6 +5,18 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from copy import deepcopy as copy
 import time
+from os.path import exists
+from shutil import copyfile
+
+
+# Preparation
+if not exists('spelers.txt'):
+    # create spelers.txt as copy of spelers_voorbeeld.txt
+    copyfile('spelers_voorbeeld.txt', 'spelers.txt')
+    print("---------------------------------------------------------")
+    print("Please update the player names in the file 'spelers.txt'.")
+    print("---------------------------------------------------------")
+    print("Continuing with the default names.")
 
 
 time_ref = 4*60
@@ -101,7 +113,6 @@ class Wedstrijd:
         manager = plt.get_current_fig_manager()
         manager.full_screen_toggle()
         fig_height = fig.get_size_inches()[1] * fig.dpi
-        print(f'fig_height: {fig_height}')
         textsize = fig_height/480 * 10
 
         def draw_bar(idx, speler, start, end):
