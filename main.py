@@ -7,6 +7,12 @@ from copy import deepcopy as copy
 import time
 from os.path import exists
 from shutil import copyfile
+from win32api import GetSystemMetrics
+
+
+# Global variables
+time_ref = 4*60
+screen_size = np.array([GetSystemMetrics(0), GetSystemMetrics(1)], dtype=int)
 
 
 # Preparation
@@ -18,8 +24,6 @@ if not exists('spelers.txt'):
     print("---------------------------------------------------------")
     print("Continuing with the default names.")
 
-
-time_ref = 4*60
 
 def configure_grid_uniformly(root):
     # Make sure the columns and rows take up equal space
@@ -109,11 +113,9 @@ class Wedstrijd:
         spelers['Speelbeurten_einde'] = [[] for _ in range(len(spelers))]
         spelers.sort_values(by='Gespeeld', inplace=True)
 
-        fig = plt.figure()
+        fig = plt.figure(dpi = 100 * screen_size[1] / 1080)
         manager = plt.get_current_fig_manager()
         manager.full_screen_toggle()
-        fig_height = fig.get_size_inches()[1] * fig.dpi
-        textsize = fig_height/480 * 10
 
         def draw_bar(idx, speler, start, end):
             ax_history.barh(y = idx, 
@@ -124,7 +126,6 @@ class Wedstrijd:
             ax_history.text(x = (start + end)/2, 
                             y = idx, 
                             s = f'{speler}\n{time_to_string(end - start)}', 
-                            size = textsize,
                             ha = 'center', 
                             va = 'center', 
                             color = 'k')
@@ -200,6 +201,7 @@ class Wedstrijd:
         ax_time_per_player = fig.add_subplot(gs[1:,0])
         ax_playdur_distr = fig.add_subplot(gs[1,1])
         ax_playdur_evolution = fig.add_subplot(gs[2,1])
+        fig.tight_layout()
 
         ax_history.invert_yaxis()
         ax_history.set_xlim(self.history[0].time, self.history[-1].time)
@@ -246,7 +248,6 @@ class Dashboard():
         # Create main window
         self.root = tk.Tk()
         self.root.attributes("-fullscreen", True)
-        screen_size = np.asarray([self.root.winfo_screenwidth(), self.root.winfo_screenheight()], dtype=int)
         scale_factor = screen_size[1] / 1080  # Reference height is 1080px, adjust for others
         self.font = ("Helvetica", int(14*scale_factor))
 
