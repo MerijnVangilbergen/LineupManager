@@ -583,6 +583,7 @@ class Dashboard():
 
         def _pause():
             wedstrijd.pause(tijdstip)
+            self.open_report()
             self.update_time_features()
             popup.destroy()
             
