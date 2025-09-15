@@ -8,6 +8,7 @@ import time
 from os.path import exists
 from shutil import copyfile
 from win32api import GetSystemMetrics
+import itertools
 
 
 # Global variables
@@ -113,7 +114,8 @@ class Wedstrijd:
             return self_.report(save=save)
 
         spelers = copy(self.spelers)
-        spelers['Colour'] = plt.cm.tab20.colors[:len(spelers)]
+        kleuren = list(itertools.islice(itertools.cycle(plt.cm.tab20.colors), len(spelers)))
+        spelers['Colour'] = kleuren
         spelers['Speelbeurten_begin'] = [[] for _ in range(len(spelers))]
         spelers['Speelbeurten_einde'] = [[] for _ in range(len(spelers))]
         spelers.sort_values(by='Gespeeld', inplace=True)
