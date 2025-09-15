@@ -55,10 +55,13 @@ class Wedstrijd:
             file.write("")
     
         # Create a DataFrame to keep track of the players
-        self.spelers = pd.DataFrame(index=spelers)
+        self.spelers = spelers
+        # self.spelers["Richttijd"] = # replace NaN values
+        # self.spelers["Richttijd"] *= (5*50 / self.spelers["Richttijd"].sum())
         self.spelers["Status"] = np.concatenate((5*["Actief"], (len(spelers)-5)*["Bank"]))
         self.spelers["Spot"] = np.concatenate((np.arange(5), np.arange(len(spelers)-5)))
         self.spelers["Gespeeld"] = 0.0
+        self.spelers["Gespeeld%"] = 0.0
         self.spelers["Laatste wijziging"] = -np.inf
         
         self.paused = True
@@ -97,8 +100,10 @@ class Wedstrijd:
 
     def order_bench(self):
         # This function orders the bench players based on the time they have been active
+        self.spelers["Gespeeld%"] = np.where(self.spelers["Richttijd"] > 0, self.spelers["Gespeeld"] / (60*self.spelers["Richttijd"]), 100 + self.spelers["Gespeeld"])
         bench = self.spelers.loc[self.spelers["Status"] == "Bank"]
-        argsort = bench["Gespeeld"].argsort()
+
+        argsort = bench["Gespeeld%"].argsort()
         self.spelers.loc[bench.index[argsort], "Spot"] = np.arange(len(bench))
 
     def report(self, save=False):
@@ -450,7 +455,10 @@ class Dashboard():
                     text = ''
                 elif wedstrijd.paused:
                     health = 1 - 1 / (1 + (t/time_ref)**2)
-                    text = f'Recuperatie: {time_to_string(t)}\nGespeeld: {(time_to_string(wedstrijd.spelers.loc[speler,"Gespeeld"]))}'
+                    if wedstrijd.spelers.loc[speler,"Richttijd"] > 0:
+                        text = f'Recuperatie: {time_to_string(t)}\nGespeeld: {time_to_string(wedstrijd.spelers.loc[speler,"Gespeeld"])} ({wedstrijd.spelers.loc[speler,"Gespeeld%"]:.0%})'
+                    else:
+                        text = f'Recuperatie: {time_to_string(t)}\nGespeeld: {time_to_string(wedstrijd.spelers.loc[speler,"Gespeeld"])}'
                 else:
                     health = 1 / (1 + (t/time_ref)**2)
                     text = time_to_string(t)
@@ -463,8 +471,10 @@ class Dashboard():
                 if t == np.inf:
                     text = ''
                 else:
-                    text = f'Recuperatie: {time_to_string(t)}\nGespeeld: {time_to_string(wedstrijd.spelers.loc[speler,"Gespeeld"])}'
-
+                    if wedstrijd.spelers.loc[speler,"Richttijd"] > 0:
+                        text = f'Recuperatie: {time_to_string(t)}\nGespeeld: {time_to_string(wedstrijd.spelers.loc[speler,"Gespeeld"])} ({wedstrijd.spelers.loc[speler,"Gespeeld%"]:.0%})'
+                    else:
+                        text = f'Recuperatie: {time_to_string(t)}\nGespeeld: {time_to_string(wedstrijd.spelers.loc[speler,"Gespeeld"])}'
                 colour = health_to_colour(health=health, low=200, high=238)
                 self.bench_buttons[spot].config(bg=colour)
                 self.bench_labels[spot].config(bg=colour, text=text)
@@ -662,7 +672,7 @@ class HistoryItem:
 
 
 # Example usage
-spelers = np.loadtxt('spelers.txt', dtype=str, delimiter=',')
+spelers = pd.read_csv('spelers.txt', index_col='Naam')
 wedstrijd = Wedstrijd(spelers)
 dashboard = Dashboard()
 wedstrijd.report(save=True)
