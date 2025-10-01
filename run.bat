@@ -59,28 +59,44 @@ echo ===========================================================================
 goto :end
 
 :setup_environment
-REM --- Step 2: Check if the virtual environment exists ---
+REM --- Step 2: Manage virtual environment and dependencies ---
 if not exist "%VENV_DIR%\Scripts\activate.bat" (
-    echo.
+    REM Create environment
     echo Creating virtual environment...
     python -m venv %VENV_DIR%
     if %errorlevel% neq 0 (
         echo ERROR: Failed to create the virtual environment.
         goto :end
     )
+
+    REM Activate environment
+    echo Activating virtual environment...
+    call "%VENV_DIR%\Scripts\activate.bat"
+    if %errorlevel% neq 0 (
+        echo ERROR: Failed to activate the virtual environment.
+        goto :end
+    )
+
+    REM Install dependencies
+    echo Installing packages from requirements.txt...
+    pip install -r requirements.txt
+    if %errorlevel% neq 0 (
+        echo ERROR: Failed to install required packages. Please check requirements.txt.
+        goto :end
+    )
+    echo Virtual environment created and dependencies installed.
+) else (
+    echo.
+    echo Activating virtual environment...
+    call "%VENV_DIR%\Scripts\activate.bat"
+    if %errorlevel% neq 0 (
+        echo ERROR: Failed to activate the existing virtual environment.
+        goto :end
+    )
+    echo Virtual environment activated.
 )
 
-REM --- Step 3: Activate environment and install dependencies ---
-echo.
-echo Activating virtual environment and installing packages from requirements.txt...
-call "%VENV_DIR%\Scripts\activate.bat"
-pip install -r requirements.txt
-if %errorlevel% neq 0 (
-    echo ERROR: Failed to install required packages. Please check requirements.txt.
-    goto :end
-)
-
-REM --- Step 4: Run the Python script ---
+REM --- Step 3: Run the Python script ---
 echo.
 echo =================================================================================
 echo Starting the application...
