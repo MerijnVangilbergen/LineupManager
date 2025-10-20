@@ -176,7 +176,7 @@ class Wedstrijd:
             container = ax.barh(y = spelers.index, 
                                 width = spelers['Gespeeld'], 
                                 color = spelers['Colour'])
-            ax.bar_label(container, labels=[f'{speler} - {time_to_string(gespeeld)}' for speler, gespeeld in zip(spelers.index, spelers['Gespeeld'])], label_type='center')
+            ax.bar_label(container, labels=[f'{speler} - {time_to_string(gespeeld)} ({gespeeld_perc:.0%})' for speler, gespeeld, gespeeld_perc in zip(spelers.index, spelers['Gespeeld'], spelers['Gespeeld%'])], label_type='center')
 
         def hist_playtimes_per_player(spelers, ax):
             ax.set_xlabel('Duur per speelbeurt')
@@ -400,7 +400,7 @@ class Dashboard():
         
         self.frame_bench = tk.Frame(self.main_frame)
         self.frame_bench.grid(row=1, column=1, sticky="nsew")
-        height = 3 if wedstrijd.spelers["Status"].eq("Bank").sum() < 9 else 2
+        height = np.clip(27 // wedstrijd.spelers["Status"].eq("Bank").sum(), 1, 3)
         self.bench_buttons, self.bench_labels = self.init_players(status="Bank", frame=self.frame_bench, size = (60,height))
         self.open_right_button.lift() # make sure the open button is on top
 
@@ -410,7 +410,8 @@ class Dashboard():
 
         self.frame_absent = tk.Frame(self.extra_frame_left, bg='lightgrey')
         self.frame_absent.grid(row=1, column=0, sticky="nsew")
-        self.absent_buttons = self.init_players(status="Afwezig", frame=self.frame_absent, size = (30,2))
+        height = 2 if wedstrijd.spelers["Status"].eq("Afwezig").sum() < 13 else 1
+        self.absent_buttons = self.init_players(status="Afwezig", frame=self.frame_absent, size = (30,height))
         self.close_left_button.lift() # make sure the close button is on top
 
     def init_players(self, status:str, frame:tk.Frame, size:tuple):
