@@ -114,8 +114,24 @@ class Wedstrijd:
             return self_.report(save=save)
 
         spelers = copy(self.spelers)
-        kleuren = list(itertools.islice(itertools.cycle(plt.cm.tab20.colors), len(spelers)))
-        spelers['Colour'] = kleuren
+        # Geef iedere speler een kleur en verwijder afwezige spelers.
+        if len(spelers) <= 20:
+            # Elke speler krijgt een unieke kleur. Die is onafhankelijk van wie aanwezig is, en dus zijn de kleuren in alle wedstrijden dezelfde.
+            kleuren = (plt.cm.tab10.colors + plt.cm.tab20.colors[1::2])[:len(spelers)]
+            spelers['Colour'] = kleuren
+            spelers = spelers.loc[spelers['Gespeeld'] > 0]
+        else:
+            # Er zijn meer spelers dan er kleuren zijn.
+            spelers = spelers.loc[spelers['Gespeeld'] > 0]
+            if len(spelers) <= 20:
+                # Elke speler krijgt voor deze wedstrijd een unieke kleur.
+                kleuren = (plt.cm.tab10.colors + plt.cm.tab20.colors[1::2])[:len(spelers)]
+                spelers['Colour'] = kleuren
+            else:
+                # In het onwaarschijnlijke geval dat er meer dan 20 spelers deelnamen aan deze wedstrijd, krijgen sommige spelers dezelfde kleur.
+                kleuren = list(itertools.islice(itertools.cycle(plt.cm.tab20.colors), len(spelers)))
+                spelers['Colour'] = kleuren
+        
         spelers['Speelbeurten_begin'] = [[] for _ in range(len(spelers))]
         spelers['Speelbeurten_einde'] = [[] for _ in range(len(spelers))]
         spelers.sort_values(by='Gespeeld', inplace=True)
@@ -236,7 +252,6 @@ class Wedstrijd:
 
         spelers['Speelduren'] = [np.array(einde) - np.array(begin) for begin, einde in zip(spelers['Speelbeurten_begin'], spelers['Speelbeurten_einde'])]
         verwijder_keeper_outliers(spelers)
-        spelers = spelers.loc[spelers['Gespeeld'] > 0]
 
         hbar_total_time_per_player(spelers=spelers, ax=ax_time_per_player)
         hist_playtimes_per_player(spelers, ax=ax_playdur_distr)
