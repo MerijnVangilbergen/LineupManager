@@ -176,7 +176,8 @@ class Wedstrijd:
             container = ax.barh(y = spelers.index, 
                                 width = spelers['Gespeeld'], 
                                 color = spelers['Colour'])
-            ax.bar_label(container, labels=[f'{speler} - {time_to_string(gespeeld)} ({gespeeld_perc:.0%})' for speler, gespeeld, gespeeld_perc in zip(spelers.index, spelers['Gespeeld'], spelers['Gespeeld%'])], label_type='center')
+            ax.bar_label(container, labels=[f'{speler} - {time_to_string(gespeeld)} ({gespeeld_perc:.0%})' if richttijd > 0
+                                        else f'{speler} - {time_to_string(gespeeld)}' for speler, gespeeld, gespeeld_perc, richttijd in zip(spelers.index, spelers['Gespeeld'], spelers['Gespeeld%'], spelers['Richttijd'])], label_type='center')
 
         def hist_playtimes_per_player(spelers, ax):
             ax.set_xlabel('Duur per speelbeurt')
