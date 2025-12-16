@@ -77,6 +77,7 @@ class Wedstrijd:
         self.history.append(HistoryItem(type='pause', time=tijdstip))
         self.paused = True
         self.spelers.loc[self.spelers["Status"] == "Actief", "Gespeeld"] += tijdstip - self.spelers.loc[self.spelers["Status"] == "Actief", "Laatste wijziging"]
+        self.spelers["Gespeeld%"] = np.where(self.spelers["Richttijd"] > 0, self.spelers["Gespeeld"] / (60*self.spelers["Richttijd"]), 100 + self.spelers["Gespeeld"])
         self.spelers.loc[self.spelers["Status"] == "Actief", "Laatste wijziging"] = tijdstip
     
     def wissel(self, speler_uit, speler_in, tijdstip):
@@ -180,6 +181,7 @@ class Wedstrijd:
                 spelers.at[speler,'Speelbeurten_einde'] = np.array(spelers.at[speler,'Speelbeurten_einde'])[inliers]
                 spelers.at[speler,'Speelduren'] = spelers.at[speler,'Speelduren'][inliers]
                 spelers.at[speler,'Gespeeld'] = np.sum(spelers.at[speler,'Speelduren'])
+            spelers["Gespeeld%"] = np.where(spelers["Richttijd"] > 0, spelers["Gespeeld"] / (60*spelers["Richttijd"]), 100 + spelers["Gespeeld"])
 
         def hbar_total_time_per_player(spelers, ax):
             ax.set_xlabel('Totale speeltijd per speler')
