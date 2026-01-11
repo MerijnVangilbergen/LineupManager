@@ -49,11 +49,12 @@ def time_to_string(t:float) -> str:
 
 
 class Wedstrijd:
-    def __init__(self, spelers):
+    def __init__(self, spelers, clear_history=True):
         # Create a history list to keep track of the game
         self.history = []
-        with open("history.txt", "w") as file:
-            file.write("")
+        if clear_history:
+            with open("history.txt", "w") as file:
+                file.write("")
     
         # Create a DataFrame to keep track of the players
         self.spelers = spelers
@@ -155,31 +156,34 @@ class Wedstrijd:
 
         def verwijder_keeper_outliers(spelers):
             alle_speelduren = np.concatenate(spelers['Speelduren'].values)
-            argmax = np.argmax(alle_speelduren)
-            max1 = alle_speelduren[argmax]
-            other = np.delete(alle_speelduren, argmax)
-            argmax = np.argmax(other)
-            max2 = other[argmax]
-            other = np.delete(other, argmax)
-
-            # Two outliers are expected from the goalkeeper. Remove them.
-            mu, sigma = np.mean(other), np.std(other, ddof=1)
-            if max2 > mu + 2*sigma:
-                outlier = max2
-            elif max1 > mu + 2*sigma:
-                outlier = max1
-            else:
-                outlier = np.inf
+            
+            # Check for outliers using log-normal distribution
+            log_speelduren = np.log(alle_speelduren)
+            log_speelduren = np.delete(log_speelduren, np.argmax(log_speelduren)) # remove the largest element, as this must be a goalkeeper's turn
+            mu, sigma = np.mean(log_speelduren), np.std(log_speelduren, ddof=1)
+            inlier_bounds = [np.exp(mu - 5*sigma), # probably outliers due to incorrectly entered data
+                             np.exp(mu + 2*sigma)] # probably outliers from the goalkeeper
+            outliers_upper = alle_speelduren[alle_speelduren > inlier_bounds[1]]
+            if len(outliers_upper) > 2: # make sure to remove maximally 2 upper outliers, as only 2 are expected from the goalkeeper
+                outliers_upper = np.sort(outliers_upper, descending=True)
+                inlier_bounds[1] = np.mean(outliers_upper[[2,3]])
+            print(f"mu: {mu}")
+            print(f"sigma: {sigma}")
+            print(f"lower bound: {inlier_bounds[0]} seconds")
+            print(f"upper bound: {inlier_bounds[1]/60} minutes")
+                  
 
             # remove outliers
             for speler in spelers.index:
-                inliers = spelers.at[speler,'Speelduren'] < outlier
+                inliers = np.logical_and((spelers.at[speler,'Speelduren'] >= inlier_bounds[0]),
+                                         (spelers.at[speler,'Speelduren'] <= inlier_bounds[1]))
                 if np.all(inliers):
                     continue
                 spelers.at[speler,'Speelbeurten_begin'] = np.array(spelers.at[speler,'Speelbeurten_begin'])[inliers]
                 spelers.at[speler,'Speelbeurten_einde'] = np.array(spelers.at[speler,'Speelbeurten_einde'])[inliers]
                 spelers.at[speler,'Speelduren'] = spelers.at[speler,'Speelduren'][inliers]
                 spelers.at[speler,'Gespeeld'] = np.sum(spelers.at[speler,'Speelduren'])
+            spelers["Gespeeld%"] = np.where(spelers["Richttijd"] > 0, spelers["Gespeeld"] / (60*spelers["Richttijd"]), 100 + spelers["Gespeeld"])
 
         def hbar_total_time_per_player(spelers, ax):
             ax.set_xlabel('Totale speeltijd per speler')
@@ -202,7 +206,8 @@ class Wedstrijd:
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
             ax.spines['left'].set_visible(False)
-            _,bins,_ = ax.hist(x = spelers['Speelduren'].values, 
+            _,bins,_ = ax.hist( x = spelers['Speelduren'].values, 
+                                bins = int(np.round(np.sqrt(np.sum([len(duren) for duren in spelers['Speelduren'].values])))), 
                                 color = spelers['Colour'], 
                                 stacked=True, density=True)
             ax.set_xticks(bins) # Set the x-ticks at the bin edges
@@ -252,6 +257,7 @@ class Wedstrijd:
 
         spelers['Speelduren'] = [np.array(einde) - np.array(begin) for begin, einde in zip(spelers['Speelbeurten_begin'], spelers['Speelbeurten_einde'])]
         verwijder_keeper_outliers(spelers)
+        spelers = spelers.loc[spelers['Gespeeld'] > 0]
 
         hbar_total_time_per_player(spelers=spelers, ax=ax_time_per_player)
         hist_playtimes_per_player(spelers, ax=ax_playdur_distr)
@@ -332,8 +338,24 @@ class Dashboard():
         swap_button = tk.Button(bottom_frame, text="Wissel", command=self.wissel, font=self.font, width=30, height=2)
         swap_button.grid(row=0, column=1)
 
-        # Button to start the game
-        self.start_stop_button = tk.Button(bottom_frame, text="Start wedstrijd", command=self.unpause, font=self.font, width=30, height=2)
+        # Button to start/pause the game — label depends on current wedstrijd state
+        if 'wedstrijd' in globals() and hasattr(wedstrijd, 'history'):
+            had_unpause = any(getattr(item, 'type', None) == 'unpause' for item in wedstrijd.history)
+        else:
+            had_unpause = False
+
+        if wedstrijd.paused:
+            # If the match is paused: show "Start wedstrijd" only when it was never unpaused before
+            if had_unpause:
+                start_text = "Hervat wedstrijd"
+            else:
+                start_text = "Start wedstrijd"
+            start_cmd = self.unpause
+        else:
+            start_text = "Pauzeer / Beëindig wedstrijd"
+            start_cmd = self.pause
+
+        self.start_stop_button = tk.Button(bottom_frame, text=start_text, command=start_cmd, font=self.font, width=30, height=2)
         self.start_stop_button.grid(row=0, column=2)
         configure_grid_uniformly(bottom_frame)
         
@@ -690,8 +712,9 @@ class HistoryItem:
                 file.write(f"{datetime}: wissel(speler_uit={self.speler_uit}, speler_in={self.speler_in})\n")
 
 
-# Example usage
-spelers = pd.read_csv('spelers.txt', index_col='Naam')
-wedstrijd = Wedstrijd(spelers)
-dashboard = Dashboard()
-wedstrijd.report(save=True)
+if __name__ == '__main__':
+    # Example usage
+    spelers = pd.read_csv('spelers.txt', index_col='Naam')
+    wedstrijd = Wedstrijd(spelers)
+    dashboard = Dashboard()
+    wedstrijd.report(save=True)
