@@ -168,11 +168,6 @@ class Wedstrijd:
             if len(outliers_upper) > 2: # make sure to remove maximally 2 upper outliers, as only 2 are expected from the goalkeeper
                 outliers_upper = np.sort(outliers_upper, descending=True)
                 inlier_bounds[1] = np.mean(outliers_upper[[2,3]])
-            print(f"mu: {mu}")
-            print(f"sigma: {sigma}")
-            print(f"lower bound: {inlier_bounds[0]} seconds")
-            print(f"upper bound: {inlier_bounds[1]/60} minutes")
-                  
 
             # remove outliers
             for speler in spelers.index:
