@@ -78,6 +78,7 @@ class Wedstrijd:
         self.history.append(HistoryItem(type='pause', time=tijdstip))
         self.paused = True
         self.spelers.loc[self.spelers["Status"] == "Actief", "Gespeeld"] += tijdstip - self.spelers.loc[self.spelers["Status"] == "Actief", "Laatste wijziging"]
+        self.spelers["Gespeeld%"] = np.where(self.spelers["Richttijd"] > 0, self.spelers["Gespeeld"] / (60*self.spelers["Richttijd"]), 100 + self.spelers["Gespeeld"])
         self.spelers.loc[self.spelers["Status"] == "Actief", "Laatste wijziging"] = tijdstip
     
     def wissel(self, speler_uit, speler_in, tijdstip):
