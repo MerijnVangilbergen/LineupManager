@@ -166,8 +166,8 @@ class Wedstrijd:
                              np.exp(mu + 2*sigma)] # probably outliers from the goalkeeper
             outliers_upper = alle_speelduren[alle_speelduren > inlier_bounds[1]]
             if len(outliers_upper) > 2: # make sure to remove maximally 2 upper outliers, as only 2 are expected from the goalkeeper
-                outliers_upper = np.sort(outliers_upper, descending=True)
-                inlier_bounds[1] = np.mean(outliers_upper[[2,3]])
+                outliers_upper = np.sort(outliers_upper)[::-1] # sort in descending order
+                inlier_bounds[1] = np.mean(outliers_upper[[1,2]])
 
             # remove outliers
             for speler in spelers.index:
